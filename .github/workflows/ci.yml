@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Neovim
+        uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: v0.10.0
+
+      - name: Install JJ
+        run: |
+          curl -Lo /tmp/jj.tar.gz \
+            https://github.com/martinvonz/jj/releases/download/v0.16.0/jj-v0.16.0-x86_64-unknown-linux-musl.tar.gz
+          tar -xzf /tmp/jj.tar.gz -C /usr/local/bin jj
+          chmod +x /usr/local/bin/jj
+          jj --version
+
+      - name: Install plenary.nvim
+        run: |
+          git clone --depth=1 https://github.com/nvim-lua/plenary.nvim \
+            ~/.local/share/nvim/lazy/plenary.nvim
+
+      - name: Run tests
+        run: |
+          nvim --headless \
+            -u test/minimal_init.lua \
+            -c "PlenaryBustedDirectory test/ {minimal_init = 'test/minimal_init.lua'}" \
+            +q
+
+  lint:
+    name: Luacheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install luacheck
+        run: sudo luarocks install luacheck
+
+      - name: Run luacheck
+        run: luacheck lua/ --globals vim describe it before_each assert
