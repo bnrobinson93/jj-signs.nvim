@@ -102,6 +102,10 @@ function M.clear(bufnr)
 	api.nvim_buf_clear_namespace(bufnr, blame_ns, 0, -1)
 end
 
+M._parse_annotate = parse_annotate
+M._relative_date  = relative_date
+M._format_blame   = format_blame
+
 function M.setup_autocmds(augroup)
 	local timers = {}
 

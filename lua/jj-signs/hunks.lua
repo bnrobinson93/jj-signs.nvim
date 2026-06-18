@@ -181,7 +181,7 @@ function M.restore_hunk(bufnr)
   end
 
   api.nvim_buf_set_lines(bufnr, start0, end0, false, hunk.removed.lines)
-  vim.cmd("update")
+  vim.cmd("silent! write!")
 end
 
 function M.diffthis(rev)

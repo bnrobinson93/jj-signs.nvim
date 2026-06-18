@@ -3,6 +3,15 @@ local M = {}
 
 local word_ns = api.nvim_create_namespace("jj-signs-word")
 
+-- Split string into one-byte-per-line for vim.diff indices mode.
+-- vim.diff result_type="indices" returns line numbers; one byte per line
+-- maps line numbers directly to byte column positions.
+local function to_lines(s)
+  local t = {}
+  for i = 1, #s do t[i] = s:sub(i, i) end
+  return #t > 0 and (table.concat(t, "\n") .. "\n") or ""
+end
+
 local function run_word_diff(removed_lines, added_lines)
   local removed_regions = {}
   local added_regions   = {}
@@ -10,7 +19,7 @@ local function run_word_diff(removed_lines, added_lines)
   for i = 1, line_count do
     local rline = removed_lines[i]
     local aline = added_lines[i]
-    local rdiffs = vim.diff(rline .. "\n", aline .. "\n", { result_type = "indices" })
+    local rdiffs = vim.diff(to_lines(rline), to_lines(aline), { result_type = "indices" })
     if rdiffs then
       for _, r in ipairs(rdiffs) do
         local rs, rc, as, ac = r[1], r[2], r[3], r[4]
@@ -25,6 +34,8 @@ local function run_word_diff(removed_lines, added_lines)
   end
   return removed_regions, added_regions
 end
+
+M._run_word_diff = run_word_diff
 
 function M.place_word_diff(bufnr, hunks)
   api.nvim_buf_clear_namespace(bufnr, word_ns, 0, -1)

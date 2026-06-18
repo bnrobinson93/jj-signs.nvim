@@ -130,4 +130,133 @@ describe("hunks.get_summary", function()
     local s = M.get_summary(nil)
     eq(0, s.added)
   end)
+
+  it("counts topdelete as deleted", function()
+    local hunks = {
+      { type = "topdelete", head = "",
+        added   = { start = 0, count = 0, lines = {} },
+        removed = { start = 1, count = 3, lines = {} },
+        vend = 0 },
+    }
+    local s = M.get_summary(hunks)
+    eq(3, s.deleted)
+    eq(0, s.added)
+    eq(0, s.changed)
+  end)
+
+  it("counts changedelete: changed + excess deleted", function()
+    -- 1 added, 3 removed → 1 changed + 2 deleted
+    local hunks = {
+      { type = "changedelete", head = "",
+        added   = { start = 5, count = 1, lines = {} },
+        removed = { start = 5, count = 3, lines = {} },
+        vend = 5 },
+    }
+    local s = M.get_summary(hunks)
+    eq(1, s.changed)
+    eq(2, s.deleted)
+  end)
+end)
+
+describe("hunks.restore_hunk", function()
+  local cache = require("jj-signs.cache")
+  local api   = vim.api
+
+  local function make_buf(lines, hunk, cursor)
+    local tmp = vim.fn.tempname()
+    local f   = io.open(tmp, "w")
+    f:write(table.concat(lines, "\n") .. "\n")
+    f:close()
+    -- Use a normal (non-scratch) buffer so vim.cmd("update") can write
+    local bufnr = api.nvim_create_buf(false, false)
+    api.nvim_buf_set_name(bufnr, tmp)
+    api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+    cache.set(bufnr, {
+      root      = "/tmp",
+      change_id = "test",
+      mtime     = 0,
+      hunks     = { hunk },
+      dirty     = false,
+    })
+    api.nvim_set_current_buf(bufnr)
+    api.nvim_win_set_cursor(0, { cursor, 0 })
+    return bufnr
+  end
+
+  local function get_lines(bufnr)
+    return api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  end
+
+  after_each(function()
+    -- clean up any cache entries left over
+    for _, bufnr in ipairs(api.nvim_list_bufs()) do
+      cache.clear(bufnr)
+    end
+  end)
+
+  it("change hunk: replaces added lines with removed lines", function()
+    local hunk = {
+      type    = "change",
+      head    = "",
+      added   = { start = 2, count = 1, lines = { "new line" } },
+      removed = { start = 2, count = 1, lines = { "old line" } },
+      vend    = 2,
+    }
+    local bufnr = make_buf({ "line1", "new line", "line3" }, hunk, 2)
+    M.restore_hunk(bufnr)
+    eq({ "line1", "old line", "line3" }, get_lines(bufnr))
+  end)
+
+  it("add hunk: removes the added lines (removed.lines = {})", function()
+    local hunk = {
+      type    = "add",
+      head    = "",
+      added   = { start = 2, count = 2, lines = { "extra1", "extra2" } },
+      removed = { start = 2, count = 0, lines = {} },
+      vend    = 3,
+    }
+    local bufnr = make_buf({ "line1", "extra1", "extra2", "line4" }, hunk, 2)
+    M.restore_hunk(bufnr)
+    eq({ "line1", "line4" }, get_lines(bufnr))
+  end)
+
+  it("delete hunk: re-inserts removed lines", function()
+    local hunk = {
+      type    = "delete",
+      head    = "",
+      added   = { start = 2, count = 0, lines = {} },
+      removed = { start = 2, count = 2, lines = { "gone1", "gone2" } },
+      vend    = 2,
+    }
+    local bufnr = make_buf({ "line1", "line4" }, hunk, 2)
+    M.restore_hunk(bufnr)
+    eq({ "line1", "gone1", "gone2", "line4" }, get_lines(bufnr))
+  end)
+
+  it("topdelete hunk: prepends removed lines at buffer start", function()
+    local hunk = {
+      type    = "topdelete",
+      head    = "",
+      added   = { start = 0, count = 0, lines = {} },
+      removed = { start = 1, count = 1, lines = { "first" } },
+      vend    = 0,
+    }
+    local bufnr = make_buf({ "second", "third" }, hunk, 1)
+    M.restore_hunk(bufnr)
+    eq({ "first", "second", "third" }, get_lines(bufnr))
+  end)
+
+  it("notifies and does nothing when cursor not on a hunk", function()
+    local hunk = {
+      type    = "change",
+      head    = "",
+      added   = { start = 5, count = 1, lines = { "new" } },
+      removed = { start = 5, count = 1, lines = { "old" } },
+      vend    = 5,
+    }
+    local bufnr = make_buf({ "a", "b", "c" }, hunk, 1)
+    local original = get_lines(bufnr)
+    M.restore_hunk(bufnr)  -- cursor on line 1, hunk at line 5
+    eq(original, get_lines(bufnr))
+  end)
 end)

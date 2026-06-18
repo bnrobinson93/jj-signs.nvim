@@ -91,8 +91,7 @@ local function build_hunk_index(hunks)
     end
 
     local start_l = hunk.added.start == 0 and 1 or hunk.added.start
-    local end_l   = hunk.type == "delete" or hunk.type == "topdelete"
-      and start_l or hunk.vend
+    local end_l   = (hunk.type == "delete" or hunk.type == "topdelete") and start_l or hunk.vend
 
     index[#index + 1] = { start = start_l, vend = end_l, sign_type = sign_type }
   end
@@ -114,6 +113,9 @@ local function find_sign_at(lnum, index)
     end
   end
 end
+
+M._build_hunk_index = build_hunk_index
+M._find_sign_at     = find_sign_at
 
 local provider_registered = false
 

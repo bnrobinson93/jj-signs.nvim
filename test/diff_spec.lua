@@ -53,11 +53,9 @@ describe("diff.parse_hunks", function()
       "diff --git a/foo.txt b/foo.txt",
       "--- a/foo.txt",
       "+++ b/foo.txt",
-      "@@ -1,2 +1,4 @@",
-      " context",
+      "@@ -0,0 +1,2 @@",
       "+added line 1",
       "+added line 2",
-      " context",
     }, "\n")
 
     local hunks = diff.parse_hunks(raw)
@@ -97,9 +95,8 @@ describe("diff.parse_hunks", function()
 
   it("parses multiple hunks", function()
     local raw = table.concat({
-      "@@ -1,1 +1,2 @@",
+      "@@ -0,0 +1,1 @@",
       "+new at top",
-      " existing",
       "@@ -10,1 +11,0 @@",
       "-deleted",
       "@@ -20,1 +20,1 @@",
