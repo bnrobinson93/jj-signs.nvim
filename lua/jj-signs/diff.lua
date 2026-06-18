@@ -1,6 +1,6 @@
 local config = require("jj-signs.config")
 
---- @alias JJSigns.HunkType "add" | "change" | "delete" | "conflict"
+--- @alias JJSigns.HunkType "add" | "change" | "delete" | "topdelete" | "changedelete" | "conflict"
 
 --- @class JJSigns.HunkNode
 --- @field start integer

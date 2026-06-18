@@ -16,10 +16,12 @@ M.defaults = {
   -- Sign characters match LazyVim's gitsigns config; highlights link to standard
   -- diff groups so any colorscheme works without configuration.
   signs = {
-    add      = { text = "▎", hl = "JJSignsAdd" },
-    change   = { text = "▎", hl = "JJSignsChange" },
-    delete   = { text = "▁", hl = "JJSignsDelete" },
-    conflict = { text = "╪", hl = "JJSignsConflict" },
+    add          = { text = "▎", hl = "JJSignsAdd" },
+    change       = { text = "▎", hl = "JJSignsChange" },
+    delete       = { text = "▁", hl = "JJSignsDelete" },
+    topdelete    = { text = "▔", hl = "JJSignsTopDelete" },
+    changedelete = { text = "▎", hl = "JJSignsChangedelete" },
+    conflict     = { text = "╪", hl = "JJSignsConflict" },
   },
   signcolumn      = true,
   numhl           = false,
@@ -28,9 +30,19 @@ M.defaults = {
   max_file_length = 40000, -- matches gitsigns default
   sign_priority   = 6,
   jj_cmd          = "jj",
+  current_line_blame = false,
+  current_line_blame_opts = {
+    virt_text     = true,
+    virt_text_pos = "eol",
+    delay         = 1000,
+    format        = "‹ %s • %a • %r",
+  },
+  word_diff      = false,
+  show_deleted   = false,
   -- Optional: passed as `jj --repository <path>`. Leave nil to rely on cwd-based
   -- workspace detection, which handles all standard JJ workspace setups.
   jj_repo         = nil,
+  use_decoration_provider = true,
   -- Callback invoked after attaching to a buffer. Set up buffer-local keymaps here.
   -- Return false to cancel the attach. When nil, built-in default keymaps are used.
   on_attach       = nil,

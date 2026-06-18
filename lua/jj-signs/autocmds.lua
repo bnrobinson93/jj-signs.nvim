@@ -70,6 +70,10 @@ function M.setup()
       require("jj-signs.cache").invalidate_all()
     end,
   })
+
+  if config.config.current_line_blame then
+    require("jj-signs.blame").setup_autocmds(augroup)
+  end
 end
 
 return M

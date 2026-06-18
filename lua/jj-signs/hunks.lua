@@ -70,6 +70,12 @@ function M.get_summary(hunks)
       s.changed = s.changed + delta
       s.added   = s.added   + math.max(0, h.added.count - delta)
       s.deleted = s.deleted + math.max(0, h.removed.count - delta)
+    elseif h.type == "topdelete" then
+      s.deleted = s.deleted + h.removed.count
+    elseif h.type == "changedelete" then
+      local delta = math.min(h.added.count, h.removed.count)
+      s.changed = s.changed + math.max(delta, 1)
+      s.deleted = s.deleted + math.max(0, h.removed.count - h.added.count)
     elseif h.type == "conflict" then
       s.conflicts = s.conflicts + 1
     end
@@ -92,7 +98,8 @@ function M.nav_hunk(direction)
   if not idx then return end
 
   local hunk = entry.hunks[idx]
-  local target = hunk.type == "delete" and math.max(1, hunk.added.start)
+  local target = (hunk.type == "delete" or hunk.type == "topdelete")
+    and math.max(1, hunk.added.start)
     or hunk.added.start
   api.nvim_win_set_cursor(0, { target, 0 })
 end
@@ -153,39 +160,72 @@ function M.preview_hunk()
   })
 end
 
---- Restore the file at the hunk under cursor to its @- state.
---- This runs `jj restore` on the whole file — JJ has no CLI for partial hunk restore.
-function M.restore_hunk()
-  local bufnr = api.nvim_get_current_buf()
+function M.restore_hunk(bufnr)
+  bufnr = bufnr or api.nvim_get_current_buf()
   local entry = cache.get(bufnr)
   if not entry then return end
 
-  local filepath = api.nvim_buf_get_name(bufnr)
-
-  local answer = vim.fn.confirm(
-    "Restore " .. vim.fn.fnamemodify(filepath, ":t") .. " from @-? (cannot be undone)",
-    "&Yes\n&No",
-    2
-  )
-  if answer ~= 1 then return end
-
-  local cmd = { config.config.jj_cmd }
-  if config.config.jj_repo then
-    vim.list_extend(cmd, { "--repository", config.config.jj_repo })
+  local lnum = api.nvim_win_get_cursor(0)[1]
+  local hunk = M.find_hunk(lnum, entry.hunks)
+  if not hunk then
+    vim.notify("jj-signs: no hunk at cursor", vim.log.levels.WARN)
+    return
   end
-  vim.list_extend(cmd, { "restore", "--from", "@-", "--", filepath })
 
-  vim.system(cmd, { cwd = entry.root },
-    function(result)
-      vim.schedule(function()
-        if result.code == 0 then
-          vim.cmd("edit")  -- reload buffer from disk
-        else
-          vim.notify("jj restore failed: " .. (result.stderr or ""), vim.log.levels.ERROR)
-        end
-      end)
-    end
-  )
+  local start0 = hunk.added.start - 1
+  local end0   = hunk.added.start + hunk.added.count - 1
+
+  if hunk.added.start == 0 then
+    start0 = 0
+    end0   = 0
+  end
+
+  api.nvim_buf_set_lines(bufnr, start0, end0, false, hunk.removed.lines)
+  vim.cmd("update")
+end
+
+function M.diffthis(rev)
+	rev = rev or "@-"
+	local bufnr = api.nvim_get_current_buf()
+	local filepath = api.nvim_buf_get_name(bufnr)
+	local entry = cache.get(bufnr)
+	if not entry then return end
+
+	local cmd = { config.config.jj_cmd }
+	if config.config.jj_repo then
+		vim.list_extend(cmd, { "--repository", config.config.jj_repo })
+	end
+	vim.list_extend(cmd, { "file", "show", "--revision", rev, "--", filepath })
+
+	vim.system(cmd, { text = true, cwd = entry.root }, function(result)
+		if result.code ~= 0 then
+			vim.schedule(function()
+				vim.notify("jj-signs: could not get file at " .. rev, vim.log.levels.ERROR)
+			end)
+			return
+		end
+		vim.schedule(function()
+			local tmp = vim.fn.tempname()
+			local f = io.open(tmp, "w")
+			if f then
+				f:write(result.stdout)
+				f:close()
+			end
+			vim.cmd("vert diffsplit " .. vim.fn.fnameescape(tmp))
+			local tmpbuf = api.nvim_get_current_buf()
+			vim.bo[tmpbuf].bufhidden = "wipe"
+			vim.bo[tmpbuf].modifiable = false
+			api.nvim_buf_set_name(tmpbuf, rev .. ":" .. vim.fn.fnamemodify(filepath, ":t"))
+		end)
+	end)
+end
+
+function M.diffthis_rev()
+	vim.ui.input({ prompt = "Revision: ", default = "@-" }, function(input)
+		if input and input ~= "" then
+			M.diffthis(input)
+		end
+	end)
 end
 
 return M
