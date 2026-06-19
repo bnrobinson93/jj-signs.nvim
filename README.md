@@ -5,10 +5,12 @@ Inline change annotations for Neovim in [JJ](https://github.com/martinvonz/jj) r
 Shows which lines in the current buffer are part of the current JJ change (`@`) compared to its parent:
 
 ```
-▎  added line      — green sign in signcolumn
-▎  modified line   — yellow sign
-▁  deleted above   — red underscore at deletion point
-╪  conflict line   — red, distinct from normal diffs
+▎  added line          — green sign
+▎  modified line       — yellow sign
+▁  deleted below       — red underscore at deletion point
+▔  deleted at top      — red overscore (topdelete)
+▎  modified + shrunk   — yellow/red (changedelete)
+╪  conflict line       — red, distinct from normal diffs
 ```
 
 Signs refresh automatically on `BufEnter`, `BufWritePost`, and `FocusGained`. No manual command needed.
@@ -37,17 +39,22 @@ All options with their defaults:
 ```lua
 require("jj-signs").setup({
   signs = {
-    add      = { text = "▎", hl = "JJSignsAdd" },
-    change   = { text = "▎", hl = "JJSignsChange" },
-    delete   = { text = "▁", hl = "JJSignsDelete" },
-    conflict = { text = "╪", hl = "JJSignsConflict" },
+    add          = { text = "▎", hl = "JJSignsAdd" },
+    change       = { text = "▎", hl = "JJSignsChange" },
+    delete       = { text = "▁", hl = "JJSignsDelete" },
+    topdelete    = { text = "▔", hl = "JJSignsTopDelete" },
+    changedelete = { text = "▎", hl = "JJSignsChangedelete" },
+    conflict     = { text = "╪", hl = "JJSignsConflict" },
   },
   signcolumn      = true,
-  numhl           = false,  -- highlight the number column
-  linehl          = false,  -- highlight the full line
+  numhl           = false,   -- highlight the number column
+  linehl          = false,   -- highlight the full line
+  word_diff       = false,   -- intra-line word highlights on changed lines
+  show_deleted    = false,   -- render deleted lines as dimmed virtual text
   update_debounce = 100,
   max_file_length = 40000,
   sign_priority   = 6,
+  use_decoration_provider = true,  -- render signs lazily for visible lines only
   jj_cmd          = "jj",
   -- Optional: passed as `jj --repository <path>` to every jj call.
   -- Leave nil — cwd-based workspace detection handles all standard JJ setups.
@@ -55,26 +62,35 @@ require("jj-signs").setup({
   -- Called after attaching to a buffer. Set up buffer-local keymaps here.
   -- Return false to cancel the attach. When nil, built-in default keymaps are used.
   on_attach       = nil,
+
+  -- Inline blame (disabled by default)
+  current_line_blame = false,
+  current_line_blame_opts = {
+    virt_text     = true,
+    virt_text_pos = "eol",   -- "eol" | "right_align"
+    delay         = 1000,    -- ms after CursorHold before showing
+    format        = "‹ %s • %a • %r",  -- %s=change_id, %a=author, %r=relative date
+  },
 })
 ```
 
 ## Keymaps
 
-Default keymaps are **buffer-local** and set via the `on_attach` callback.
-They intentionally match [LazyVim's gitsigns layout](https://www.lazyvim.org/plugins/editor#gitsignsnvim)
-so muscle memory transfers directly when migrating from Git to JJ.
+Default keymaps are buffer-local and set during attach. They match [LazyVim's gitsigns layout](https://www.lazyvim.org/plugins/editor#gitsignsnvim) so muscle memory transfers when migrating from Git to JJ.
 
-| Key             | Action                          | LazyVim gitsigns equivalent |
-|-----------------|---------------------------------|-----------------------------|
-| `]h`            | Jump to next hunk               | `]h`                        |
-| `[h`            | Jump to previous hunk           | `[h`                        |
-| `]H`            | Jump to last hunk               | `]H`                        |
-| `[H`            | Jump to first hunk              | `[H`                        |
-| `<leader>ghp`   | Preview hunk in floating window | `<leader>ghp`               |
-| `<leader>ghr`   | Restore file from `@-`          | `<leader>ghr` (reset hunk)  |
+| Key             | Mode    | Action                                  |
+|-----------------|---------|-----------------------------------------|
+| `]h`            | n       | Jump to next hunk                       |
+| `[h`            | n       | Jump to previous hunk                   |
+| `]H`            | n       | Jump to last hunk                       |
+| `[H`            | n       | Jump to first hunk                      |
+| `<leader>ghp`   | n       | Preview hunk in floating window         |
+| `<leader>ghr`   | n       | Restore hunk to `@-` state             |
+| `<leader>ghd`   | n       | Diff current file vs `@-` in vimdiff   |
+| `<leader>ghD`   | n       | Diff vs a prompted revision             |
+| `ih`            | x, o    | Select hunk (inner hunk text object)   |
 
-> **Note:** `restore_hunk` restores the entire file from the parent change (`@-`), not just the
-> hunk under cursor. JJ's CLI does not currently support partial hunk restore.
+`restore_hunk` applies a per-hunk restore using `nvim_buf_set_lines` — no subprocess, instant, and undoable with `u`.
 
 ### Custom keymaps
 
@@ -84,22 +100,33 @@ Override `on_attach` to replace the default keymaps entirely:
 require("jj-signs").setup({
   on_attach = function(bufnr)
     local jj = require("jj-signs")
-    local map = function(key, fn, desc)
-      vim.keymap.set("n", key, fn, { buffer = bufnr, desc = desc })
+    local map = function(mode, key, fn, desc)
+      vim.keymap.set(mode, key, fn, { buffer = bufnr, desc = desc })
     end
-    map("]h", function() jj.nav_hunk("next")  end, "Next JJ hunk")
-    map("[h", function() jj.nav_hunk("prev")  end, "Prev JJ hunk")
-    map("]H", function() jj.nav_hunk("last")  end, "Last JJ hunk")
-    map("[H", function() jj.nav_hunk("first") end, "First JJ hunk")
-    map("<leader>ghp", jj.preview_hunk, "Preview JJ hunk")
-    map("<leader>ghr", jj.restore_hunk, "Restore from @-")
+    map("n", "]h",          function() jj.nav_hunk("next")  end, "Next JJ hunk")
+    map("n", "[h",          function() jj.nav_hunk("prev")  end, "Prev JJ hunk")
+    map("n", "<leader>ghp", jj.preview_hunk,                    "Preview JJ hunk")
+    map("n", "<leader>ghr", jj.restore_hunk,                    "Restore hunk from @-")
+    map({"x","o"}, "ih",    jj.select_hunk,                     "Select hunk")
   end,
 })
 ```
 
-## Statusline Integration
+## Inline Blame
 
-`jj-signs.nvim` exports a `summary()` function for statusline components:
+When `current_line_blame = true`, the author and relative date of the last change to the cursor line appear as virtual text at end-of-line after `CursorHold`:
+
+```
+fn process(input: &str) -> Result<()> {      ‹ kkpqsvxy • brad • 3 days ago
+```
+
+Blame is sourced from `jj annotate` and cached per `change_id`. Toggle at runtime:
+
+```lua
+require("jj-signs").toggle_current_line_blame()
+```
+
+## Statusline Integration
 
 ```lua
 -- lualine component
@@ -119,32 +146,53 @@ require("jj-signs").setup({
 }
 ```
 
+## Public API
+
+| Function | Description |
+|----------|-------------|
+| `setup(opts)` | Initialize with config |
+| `attach(bufnr?)` | Attach to buffer (called automatically) |
+| `detach(bufnr?)` | Detach and clear signs |
+| `refresh(bufnr?)` | Force re-check change_id + mtime and redraw |
+| `nav_hunk(direction)` | Navigate: `"next"` `"prev"` `"first"` `"last"` |
+| `preview_hunk()` | Float showing removed/added lines |
+| `restore_hunk()` | Replace hunk lines with `@-` content via buffer API |
+| `select_hunk(bufnr?)` | Set visual selection to hunk lines |
+| `diffthis(rev?)` | Open vimdiff vs `rev` (default `"@-"`) |
+| `diffthis_rev()` | Prompt for revision, then open vimdiff |
+| `toggle_current_line_blame()` | Toggle inline blame |
+| `summary()` | Return `{ added, changed, deleted, conflicts }` |
+
 ## Highlights
 
-Default highlights link to standard Neovim diff groups so any colorscheme works:
+Default highlight groups link to standard Neovim diff groups so any colorscheme works:
 
-| Group              | Links to          |
-|--------------------|-------------------|
-| `JJSignsAdd`       | `DiffAdd`         |
-| `JJSignsChange`    | `DiffChange`      |
-| `JJSignsDelete`    | `DiffDelete`      |
-| `JJSignsConflict`  | `DiagnosticError` |
-| `JJSigns*Nr`       | `JJSigns*` (numhl variants) |
-| `JJSigns*Ln`       | diff groups (linehl variants) |
+| Group                    | Links to          | Purpose |
+|--------------------------|-------------------|---------|
+| `JJSignsAdd`             | `Added` / `DiffAdd`    | Added lines |
+| `JJSignsChange`          | `Changed` / `DiffChange` | Changed lines |
+| `JJSignsDelete`          | `Removed` / `DiffDelete` | Deleted lines |
+| `JJSignsTopDelete`       | `Removed` / `DiffDelete` | Deletion at file top |
+| `JJSignsChangedelete`    | `Changed` / `DiffChange` | Change that shrinks |
+| `JJSignsConflict`        | `DiagnosticError` | Conflict markers |
+| `JJSignsAddWord`         | `Added` / `DiffAdd`    | Word diff inline (added) |
+| `JJSignsChangeWord`      | `Changed` / `DiffChange` | Word diff inline (changed) |
+| `JJSignsDeleteWord`      | `Removed` / `DiffDelete` | Word diff inline (deleted) |
+| `JJSignsDeleteVirtLn`    | `DiffDelete`      | show_deleted virtual lines |
+| `JJSignsCurrentLineBlame`| `NonText`         | Inline blame text |
+| `JJSigns*Nr`             | `JJSigns*`        | Number column variants (numhl) |
+| `JJSigns*Ln`             | diff groups       | Line highlight variants (linehl) |
 
-Override in your config:
+Override any group in your config:
 ```lua
 vim.api.nvim_set_hl(0, "JJSignsAdd", { fg = "#00ff00" })
 ```
 
 ## JJ Workspaces
 
-Multiple JJ workspaces (`jj workspace add`) are supported automatically. Each workspace has its
-own `@`, and signs reflect whichever workspace owns the file you are editing. No configuration
-needed — the plugin detects the workspace root via `jj root` from the file's directory.
+Multiple JJ workspaces (`jj workspace add`) are supported automatically. Each workspace has its own `@`, and signs reflect whichever workspace owns the file being edited. No configuration needed — the plugin detects the workspace root via `jj root` from the file's directory.
 
-If you access files from outside their workspace directory (symlinks, remote mounts, etc.), set
-`jj_repo` to the workspace root explicitly:
+If you access files from outside their workspace (symlinks, remote mounts, etc.), set `jj_repo` to the workspace root:
 
 ```lua
 require("jj-signs").setup({
@@ -152,15 +200,11 @@ require("jj-signs").setup({
 })
 ```
 
-This passes `--repository` to every `jj` invocation, pinning it to the correct workspace.
-
 ## What It Does Not Do
 
 - No staging (JJ has no index)
-- No line blame (see `jj annotate`)
-- No diff for arbitrary revisions (use your `jj.nvim` plugin for that)
-- No signs for parent changes — only the current `@`
-- No virtual text — signcolumn only
+- No signs for changes other than `@` vs its parent
+- No hunk-level CLI operations — restore uses the buffer API, diff uses a temp file
 
 ## Credits
 
