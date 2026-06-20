@@ -45,6 +45,21 @@ function M.invalidate_all()
   end
 end
 
+--- @param root string
+function M.invalidate_all_in_root(root)
+  for _, entry in pairs(cache) do
+    if entry.root == root then
+      entry.dirty     = true
+      entry.base_text = nil
+    end
+  end
+end
+
+--- @return table<integer, JJSigns.CacheEntry>
+function M.all()
+  return cache
+end
+
 --- @param bufnr integer
 --- @return boolean
 function M.has(bufnr)

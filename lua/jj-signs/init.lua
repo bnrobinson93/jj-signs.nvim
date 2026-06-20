@@ -6,6 +6,7 @@ local diff_mod = require("jj-signs.diff")
 local signs    = require("jj-signs.signs")
 local hunks    = require("jj-signs.hunks")
 local autocmds = require("jj-signs.autocmds")
+local watcher  = require("jj-signs.watcher")
 
 -- Generation counter per buffer. Incremented on every refresh() call so that
 -- in-flight async callbacks from earlier calls can detect they are stale and
@@ -79,16 +80,29 @@ function M.attach(bufnr)
     end
 
     M.refresh(bufnr)
+
+    watcher.start(root, function()
+      cache.invalidate_all_in_root(root)
+      for buf, buf_entry in pairs(cache.all()) do
+        if buf_entry.root == root then
+          autocmds.schedule_refresh(buf)
+        end
+      end
+    end)
   end)
 end
 
 --- @param bufnr integer?
 function M.detach(bufnr)
   bufnr = bufnr or api.nvim_get_current_buf()
+  local entry = cache.get(bufnr)
   refresh_gens[bufnr] = nil
   autocmds.cancel(bufnr)
   signs.clear(bufnr)
   cache.clear(bufnr)
+  if entry then
+    watcher.stop(entry.root)
+  end
 end
 
 --- Refresh signs for a buffer. Checks change_id + mtime cache before running jj diff.
