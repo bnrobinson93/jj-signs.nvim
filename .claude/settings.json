@@ -1,0 +1,21 @@
+{
+  "allowedTools": [
+    "Bash(jj *)",
+    "Bash(jj-agent *)",
+    "Bash(tmux *)",
+    "Bash(git log*)",
+    "Bash(git diff*)",
+    "Bash(git show*)",
+    "Bash(git status*)",
+    "Bash(gh pr view*)",
+    "Bash(gh issue view*)",
+    "Bash(gh api*)",
+    "Bash(curl -s*)",
+    "Bash(curl --silent*)",
+    "Bash(cat *)",
+    "Bash(ls *)",
+    "Bash(find *)",
+    "Bash(grep *)",
+    "Bash(rg *)"
+  ]
+}
