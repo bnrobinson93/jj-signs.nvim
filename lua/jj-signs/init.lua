@@ -62,11 +62,12 @@ function M.attach(bufnr)
     if not root then return end  -- not a jj repo
 
     cache.set(bufnr, {
-      root      = root,
-      change_id = "",
-      mtime     = 0,
-      hunks     = {},
-      dirty     = true,
+      root        = root,
+      change_id   = "",
+      mtime       = 0,
+      hunks       = {},
+      dirty       = true,
+      dirty_range = nil,
     })
 
     -- Apply keymaps: user-supplied on_attach, or built-in defaults
@@ -81,6 +82,24 @@ function M.attach(bufnr)
     end
 
     M.refresh(bufnr)
+
+    -- Track dirty line ranges per keystroke instead of re-diffing the whole
+    -- buffer on every TextChanged. on_lines reports the changed line region;
+    -- we union it into entry.dirty_range so refresh() can narrow the diff.
+    api.nvim_buf_attach(bufnr, false, {
+      on_lines = function(_, buf, _, first, _last_old, last_new, _)
+        local e = cache.get(buf)
+        if not e then return true end  -- return true to detach
+        -- Union new dirty range with existing dirty range
+        if not e.dirty_range then
+          e.dirty_range = { first = first, last = last_new }
+        else
+          e.dirty_range.first = math.min(e.dirty_range.first, first)
+          e.dirty_range.last  = math.max(e.dirty_range.last, last_new)
+        end
+        autocmds.schedule_refresh(buf)
+      end,
+    })
 
     watcher.start(root, function()
       cache.invalidate_all_in_root(root)
@@ -148,25 +167,67 @@ function M.refresh(bufnr)
     local function do_buf_diff(base_text)
       if refresh_gens[bufnr] ~= gen then return end  -- stale
       if not api.nvim_buf_is_valid(bufnr) then return end
+
+      local e = cache.get(bufnr)
       local lines = api.nvim_buf_get_lines(bufnr, 0, -1, false)
       local buf_text = table.concat(lines, "\n")
       if vim.bo[bufnr].eol then buf_text = buf_text .. "\n" end
 
-      diff_mod.diff_async(base_text, buf_text, { ctxlen = 3 }, function(diff_out)
-        -- Generation check INSIDE the callback (post-thread): stale callbacks
-        -- from a prior refresh must abort after the worker returns, not only
-        -- before dispatch. The check at the top of do_buf_diff is an early-exit.
-        if refresh_gens[bufnr] ~= gen then return end
-        if not api.nvim_buf_is_valid(bufnr) then return end
-        local diff_hunks = (diff_out and diff_out ~= "") and diff_mod.parse_hunks(diff_out) or {}
-        local conflict_hunks = diff_mod.find_conflicts(bufnr)
-        local merged = diff_mod.merge_hunks(diff_hunks, conflict_hunks)
-        local e = cache.get(bufnr)
-        if not e then return end
-        e.hunks = merged
-        e.dirty = false
-        signs.place(bufnr, merged)
-      end)
+      -- If we have a narrow dirty range, diff only that region.
+      -- Context lines (±3) ensure hunk boundaries are correct.
+      -- On narrow diff: produce a partial result and merge into cached hunks.
+      local dr = e and e.dirty_range
+      local use_narrow = dr ~= nil and e ~= nil and #e.hunks >= 0
+
+      if use_narrow then
+        local ctx = 3
+        local first = math.max(0, dr.first - ctx)
+        local last  = math.min(#lines, dr.last + ctx)
+        local base_lines = vim.split(base_text, "\n")
+        local base_narrow = table.concat(vim.list_slice(base_lines, first + 1, last), "\n") .. "\n"
+        local buf_narrow  = table.concat(vim.list_slice(lines, first + 1, last), "\n") .. "\n"
+
+        diff_mod.diff_async(base_narrow, buf_narrow, { ctxlen = ctx }, function(diff_out)
+          if refresh_gens[bufnr] ~= gen then return end
+          if not api.nvim_buf_is_valid(bufnr) then return end
+          local e2 = cache.get(bufnr)
+          if not e2 then return end
+          -- Adjust hunk line numbers by the slice offset
+          local partial = (diff_out and diff_out ~= "") and diff_mod.parse_hunks(diff_out) or {}
+          for _, hk in ipairs(partial) do
+            hk.added.start   = hk.added.start   + first
+            hk.vend          = hk.vend          + first
+            hk.removed.start = hk.removed.start + first
+          end
+          -- Merge partial hunks into cached hunk list: replace hunks that overlap
+          -- the dirty range; keep others unchanged.
+          local merged_hunks = diff_mod.replace_hunks_in_range(e2.hunks, partial, dr.first, dr.last)
+          local conflict_hunks = diff_mod.find_conflicts(bufnr)
+          local merged = diff_mod.merge_hunks(merged_hunks, conflict_hunks)
+          e2.hunks = merged
+          e2.dirty = false
+          e2.dirty_range = nil
+          signs.place(bufnr, merged)
+        end)
+      else
+        -- Full diff fallback (first load or unknown range)
+        diff_mod.diff_async(base_text, buf_text, { ctxlen = 3 }, function(diff_out)
+          -- Generation check INSIDE the callback (post-thread): stale callbacks
+          -- from a prior refresh must abort after the worker returns, not only
+          -- before dispatch. The check at the top of do_buf_diff is an early-exit.
+          if refresh_gens[bufnr] ~= gen then return end
+          if not api.nvim_buf_is_valid(bufnr) then return end
+          local diff_hunks = (diff_out and diff_out ~= "") and diff_mod.parse_hunks(diff_out) or {}
+          local conflict_hunks = diff_mod.find_conflicts(bufnr)
+          local merged = diff_mod.merge_hunks(diff_hunks, conflict_hunks)
+          local e2 = cache.get(bufnr)
+          if not e2 then return end
+          e2.hunks = merged
+          e2.dirty = false
+          e2.dirty_range = nil
+          signs.place(bufnr, merged)
+        end)
+      end
     end
 
     diff_mod.get_parent_ids(entry.root, function(new_pcid, new_ppid)
@@ -243,6 +304,7 @@ function M.refresh(bufnr)
         mtime            = new_mtime,
         hunks            = merged,
         dirty            = false,
+        dirty_range      = nil,  -- file clean after write
         base_text        = entry.base_text,
         parent_change_id = entry.parent_change_id,
         parent_commit_id = entry.parent_commit_id,

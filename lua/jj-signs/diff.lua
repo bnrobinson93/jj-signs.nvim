@@ -302,6 +302,39 @@ function M.find_conflicts(bufnr)
 	return conflict_hunks
 end
 
+--- Merge freshly-computed partial hunks (from a narrowed diff over a dirty line
+--- range) into a cached full-buffer hunk list. Hunks that overlap the dirty
+--- range are stale and dropped; non-overlapping hunks are kept untouched. The
+--- partial hunks replace the dropped region.
+---
+--- Ranges are line numbers; existing hunks span [added.start, vend].
+--- @param existing JJSigns.Hunk[]
+--- @param new_partial JJSigns.Hunk[]
+--- @param range_first integer  start of dirty range
+--- @param range_last  integer  end of dirty range
+--- @return JJSigns.Hunk[]
+function M.replace_hunks_in_range(existing, new_partial, range_first, range_last)
+	local result = {} --- @type JJSigns.Hunk[]
+
+	-- Keep cached hunks that lie entirely outside the dirty range.
+	for _, h in ipairs(existing or {}) do
+		if h.vend < range_first or h.added.start > range_last then
+			result[#result + 1] = h
+		end
+	end
+
+	-- Splice in the freshly-diffed hunks for the dirty region.
+	for _, h in ipairs(new_partial or {}) do
+		result[#result + 1] = h
+	end
+
+	table.sort(result, function(a, b)
+		return a.added.start < b.added.start
+	end)
+
+	return result
+end
+
 --- Merge diff hunks and conflict hunks, with conflicts taking priority.
 --- @param diff_hunks JJSigns.Hunk[]
 --- @param conflict_hunks JJSigns.Hunk[]

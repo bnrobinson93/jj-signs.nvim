@@ -96,12 +96,9 @@ function M.setup()
     callback = M._on_win_view,
   })
 
-  api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "InsertEnter", "InsertLeave" }, {
-    group    = augroup,
-    callback = function(args)
-      M.schedule_refresh(args.buf)
-    end,
-  })
+  -- TextChanged/TextChangedI/InsertEnter/InsertLeave superseded by
+  -- nvim_buf_attach's on_lines (see init.attach), which tracks the dirty line
+  -- range so the diff can be narrowed instead of re-diffing the whole buffer.
 
   -- Invalidate root cache when jj ops happen (repo-level changes)
   api.nvim_create_autocmd("BufWritePost", {
