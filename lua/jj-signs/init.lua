@@ -1,7 +1,8 @@
 local api = vim.api
 
-local config   = require("jj-signs.config")
-local cache    = require("jj-signs.cache")
+local config     = require("jj-signs.config")
+local cache      = require("jj-signs.cache")
+local base_cache = require("jj-signs.base_cache")
 local diff_mod = require("jj-signs.diff")
 local signs    = require("jj-signs.signs")
 local hunks    = require("jj-signs.hunks")
@@ -100,6 +101,17 @@ function M.detach(bufnr)
   autocmds.cancel(bufnr)
   signs.clear(bufnr)
   cache.clear(bufnr)
+
+  -- Evict shared base_cache entries no longer referenced by any live buffer.
+  local active_keys = {}
+  for buf, ent in pairs(cache.all()) do
+    if ent.parent_change_id and ent.parent_commit_id then
+      local fp = api.nvim_buf_get_name(buf)
+      active_keys[base_cache.key(fp, ent.parent_change_id, ent.parent_commit_id)] = true
+    end
+  end
+  base_cache.evict_stale(active_keys)
+
   if entry then
     watcher.stop(entry.root)
   end
@@ -171,15 +183,22 @@ function M.refresh(bufnr)
       if e.base_text then
         do_buf_diff(e.base_text)
       else
-        diff_mod.fetch_base(filepath, e.root, function(base_text)
-          if refresh_gens[bufnr] ~= gen then return end  -- stale
-          local e2 = cache.get(bufnr)
-          if not e2 then return end
-          e2.base_text = base_text
-          e2.parent_change_id = new_pcid
-          e2.parent_commit_id = new_ppid
-          do_buf_diff(base_text)
-        end)
+        local cached_base = base_cache.get(filepath, new_pcid, new_ppid)
+        if cached_base then
+          e.base_text = cached_base   -- keep local entry in sync
+          do_buf_diff(cached_base)
+        else
+          diff_mod.fetch_base(filepath, e.root, function(base_text)
+            if refresh_gens[bufnr] ~= gen then return end  -- stale
+            local e2 = cache.get(bufnr)
+            if not e2 then return end
+            e2.base_text = base_text
+            e2.parent_change_id = new_pcid
+            e2.parent_commit_id = new_ppid
+            base_cache.set(filepath, new_pcid, new_ppid, base_text)
+            do_buf_diff(base_text)
+          end)
+        end
       end
     end)
     return
