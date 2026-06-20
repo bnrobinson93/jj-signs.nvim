@@ -80,6 +80,23 @@ function M.get_change_id(root, cb)
 	)
 end
 
+--- @param root string
+--- @param cb fun(parent_change_id: string?, parent_commit_id: string?)
+function M.get_parent_ids(root, cb)
+	vim.system(
+		jj({ "log", "-r", "@-", "-T", 'change_id ++ " " ++ commit_id', "--no-graph", "--color=never" }),
+		{ text = true, cwd = root },
+		function(result)
+			if result.code ~= 0 or not result.stdout then
+				vim.schedule(function() cb(nil, nil) end)
+				return
+			end
+			local parts = vim.split(vim.trim(result.stdout), " ")
+			vim.schedule(function() cb(parts[1], parts[2]) end)
+		end
+	)
+end
+
 --- Fetch the parent revision's content for a file.
 --- Returns empty string for new files not yet in the parent.
 --- @param filepath string

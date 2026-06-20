@@ -1,4 +1,6 @@
 local diff = require("jj-signs.diff")
+local cache_mod = require("jj-signs.cache")
+local jj_init = require("jj-signs.init")
 local h = require("test.helpers")
 local eq = h.eq
 
@@ -181,5 +183,170 @@ describe("diff.merge_hunks", function()
     local result = diff.merge_hunks(diff_hunks, conflict_hunks)
     eq(1, #result)
     eq("conflict", result[1].type)
+  end)
+end)
+
+describe("diff.get_parent_ids", function()
+  local orig_system
+  local orig_schedule
+
+  before_each(function()
+    orig_system = vim.system
+    orig_schedule = vim.schedule
+    vim.schedule = function(fn) fn() end
+  end)
+
+  after_each(function()
+    vim.system = orig_system
+    vim.schedule = orig_schedule
+  end)
+
+  it("parses stdout into change_id and commit_id", function()
+    vim.system = function(_, _, cb)
+      cb({ code = 0, stdout = "abc123 def456\n" })
+    end
+    local got_pcid, got_ppid
+    diff.get_parent_ids("/fake/root", function(pcid, ppid)
+      got_pcid = pcid
+      got_ppid = ppid
+    end)
+    eq("abc123", got_pcid)
+    eq("def456", got_ppid)
+  end)
+
+  it("returns nil, nil when jj command fails", function()
+    vim.system = function(_, _, cb)
+      cb({ code = 1, stdout = nil })
+    end
+    local got_pcid, got_ppid = "sentinel", "sentinel"
+    diff.get_parent_ids("/fake/root", function(pcid, ppid)
+      got_pcid = pcid
+      got_ppid = ppid
+    end)
+    eq(nil, got_pcid)
+    eq(nil, got_ppid)
+  end)
+
+  it("trims whitespace from stdout before splitting", function()
+    vim.system = function(_, _, cb)
+      cb({ code = 0, stdout = "  changeid   commitid  \n" })
+    end
+    local got_pcid, got_ppid
+    diff.get_parent_ids("/fake/root", function(pcid, ppid)
+      got_pcid = pcid
+      got_ppid = ppid
+    end)
+    eq("changeid", got_pcid)
+    eq("commitid", got_ppid)
+  end)
+end)
+
+describe("refresh() modified-buffer base_text invalidation", function()
+  local orig_system
+  local orig_schedule
+  local tmpfile
+  local bufnr
+
+  before_each(function()
+    tmpfile = vim.fn.tempname() .. ".txt"
+    local f = assert(io.open(tmpfile, "w"))
+    f:write("original\n")
+    f:close()
+
+    bufnr = vim.fn.bufadd(tmpfile)
+    vim.fn.bufload(bufnr)
+    -- Modify buffer content so modified=true
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "original", "MODIFIED" })
+
+    orig_system = vim.system
+    orig_schedule = vim.schedule
+    vim.schedule = function(fn) fn() end
+  end)
+
+  after_each(function()
+    vim.system = orig_system
+    vim.schedule = orig_schedule
+    cache_mod.clear(bufnr)
+    pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+    os.remove(tmpfile)
+  end)
+
+  local function make_system_stub(parent_stdout, fetch_base_called_ref)
+    return function(cmd, _, cb)
+      if vim.tbl_contains(cmd, "log") then
+        cb({ code = 0, stdout = parent_stdout })
+      elseif vim.tbl_contains(cmd, "show") then
+        if fetch_base_called_ref then fetch_base_called_ref.v = true end
+        cb({ code = 0, stdout = "base content\n" })
+      else
+        cb({ code = 0, stdout = "" })
+      end
+    end
+  end
+
+  it("invalidates base_text and re-fetches when parent_change_id differs", function()
+    cache_mod.set(bufnr, {
+      root             = "/fake",
+      change_id        = "cid",
+      mtime            = 0,
+      hunks            = {},
+      dirty            = false,
+      base_text        = "stale base\n",
+      parent_change_id = "old_pcid",
+      parent_commit_id = "ppid",
+    })
+
+    local called = { v = false }
+    vim.system = make_system_stub("new_pcid ppid\n", called)
+
+    jj_init.refresh(bufnr)
+
+    eq(true, called.v)
+    local e = cache_mod.get(bufnr)
+    eq("new_pcid", e.parent_change_id)
+    eq("ppid", e.parent_commit_id)
+  end)
+
+  it("invalidates base_text and re-fetches when only parent_commit_id differs", function()
+    cache_mod.set(bufnr, {
+      root             = "/fake",
+      change_id        = "cid",
+      mtime            = 0,
+      hunks            = {},
+      dirty            = false,
+      base_text        = "stale base\n",
+      parent_change_id = "pcid",
+      parent_commit_id = "old_ppid",
+    })
+
+    local called = { v = false }
+    vim.system = make_system_stub("pcid new_ppid\n", called)
+
+    jj_init.refresh(bufnr)
+
+    eq(true, called.v)
+    local e = cache_mod.get(bufnr)
+    eq("pcid", e.parent_change_id)
+    eq("new_ppid", e.parent_commit_id)
+  end)
+
+  it("skips fetch_base when parent ids are unchanged (fast path)", function()
+    cache_mod.set(bufnr, {
+      root             = "/fake",
+      change_id        = "cid",
+      mtime            = 0,
+      hunks            = {},
+      dirty            = false,
+      base_text        = "cached base\n",
+      parent_change_id = "pcid",
+      parent_commit_id = "ppid",
+    })
+
+    local called = { v = false }
+    vim.system = make_system_stub("pcid ppid\n", called)
+
+    jj_init.refresh(bufnr)
+
+    eq(false, called.v)
   end)
 end)

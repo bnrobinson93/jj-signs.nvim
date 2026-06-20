@@ -1,11 +1,13 @@
 --- @class JJSigns.CacheEntry
---- @field root       string
---- @field change_id  string
---- @field mtime      number
---- @field hunks      JJSigns.Hunk[]
---- @field dirty      boolean
---- @field hunk_index { start: integer, vend: integer, sign_type: string }[]?
---- @field base_text  string?  cached parent-revision content; nil = not yet fetched or invalidated
+--- @field root             string
+--- @field change_id        string
+--- @field mtime            number
+--- @field hunks            JJSigns.Hunk[]
+--- @field dirty            boolean
+--- @field hunk_index       { start: integer, vend: integer, sign_type: string }[]?
+--- @field base_text        string?  cached parent-revision content; nil = not yet fetched or invalidated
+--- @field parent_change_id string?  change_id of @- when base_text was fetched
+--- @field parent_commit_id string?  commit_id of @- when base_text was fetched
 
 --- @type table<integer, JJSigns.CacheEntry>
 local cache = {}

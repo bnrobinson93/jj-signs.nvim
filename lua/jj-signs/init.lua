@@ -136,17 +136,31 @@ function M.refresh(bufnr)
       signs.place(bufnr, merged)
     end
 
-    if entry.base_text then
-      do_buf_diff(entry.base_text)
-    else
-      diff_mod.fetch_base(filepath, entry.root, function(base_text)
-        if refresh_gens[bufnr] ~= gen then return end  -- stale
-        local e = cache.get(bufnr)
-        if not e then return end
-        e.base_text = base_text
-        do_buf_diff(base_text)
-      end)
-    end
+    diff_mod.get_parent_ids(entry.root, function(new_pcid, new_ppid)
+      if refresh_gens[bufnr] ~= gen then return end  -- stale
+      local e = cache.get(bufnr)
+      if not e then return end
+
+      if new_pcid ~= e.parent_change_id or new_ppid ~= e.parent_commit_id then
+        e.base_text = nil
+        e.parent_change_id = new_pcid
+        e.parent_commit_id = new_ppid
+      end
+
+      if e.base_text then
+        do_buf_diff(e.base_text)
+      else
+        diff_mod.fetch_base(filepath, e.root, function(base_text)
+          if refresh_gens[bufnr] ~= gen then return end  -- stale
+          local e2 = cache.get(bufnr)
+          if not e2 then return end
+          e2.base_text = base_text
+          e2.parent_change_id = new_pcid
+          e2.parent_commit_id = new_ppid
+          do_buf_diff(base_text)
+        end)
+      end
+    end)
     return
   end
 
@@ -183,15 +197,15 @@ function M.refresh(bufnr)
       if not api.nvim_buf_is_valid(bufnr) then return end
       local conflict_hunks = diff_mod.find_conflicts(bufnr)
       local merged = diff_mod.merge_hunks(diff_hunks, conflict_hunks)
-      -- If the parent commit changed, the cached base is stale.
-      local new_base = new_change_id ~= entry.change_id and nil or entry.base_text
       cache.set(bufnr, {
-        root      = entry.root,
-        change_id = new_change_id,
-        mtime     = new_mtime,
-        hunks     = merged,
-        dirty     = false,
-        base_text = new_base,
+        root             = entry.root,
+        change_id        = new_change_id,
+        mtime            = new_mtime,
+        hunks            = merged,
+        dirty            = false,
+        base_text        = entry.base_text,
+        parent_change_id = entry.parent_change_id,
+        parent_commit_id = entry.parent_commit_id,
       })
       signs.place(bufnr, merged)
     end)
