@@ -7,6 +7,11 @@ local signs    = require("jj-signs.signs")
 local hunks    = require("jj-signs.hunks")
 local autocmds = require("jj-signs.autocmds")
 
+-- Generation counter per buffer. Incremented on every refresh() call so that
+-- in-flight async callbacks from earlier calls can detect they are stale and
+-- abort instead of clobbering fresher results.
+local refresh_gens = {} --- @type table<integer, integer>
+
 local M = {}
 
 --- @param opts JJSigns.Config?
@@ -80,12 +85,15 @@ end
 --- @param bufnr integer?
 function M.detach(bufnr)
   bufnr = bufnr or api.nvim_get_current_buf()
+  refresh_gens[bufnr] = nil
   autocmds.cancel(bufnr)
   signs.clear(bufnr)
   cache.clear(bufnr)
 end
 
 --- Refresh signs for a buffer. Checks change_id + mtime cache before running jj diff.
+--- When the buffer has unsaved changes, diffs buffer content directly so signs
+--- update live without requiring a write.
 --- @param bufnr integer?
 function M.refresh(bufnr)
   bufnr = bufnr or api.nvim_get_current_buf()
@@ -103,11 +111,61 @@ function M.refresh(bufnr)
   local entry = cache.get(bufnr)
   if not entry then return end
 
+  -- Bump generation so any in-flight callbacks from a prior refresh abort.
+  local gen = (refresh_gens[bufnr] or 0) + 1
+  refresh_gens[bufnr] = gen
+
+  -- Unsaved buffer: diff buffer content directly against cached parent so signs
+  -- update live. Parent content is fetched once and cached in entry.base_text;
+  -- subsequent TextChanged events run vim.diff() synchronously with no subprocess.
+  if vim.bo[bufnr].modified then
+    local function do_buf_diff(base_text)
+      if refresh_gens[bufnr] ~= gen then return end  -- stale
+      if not api.nvim_buf_is_valid(bufnr) then return end
+      local lines = api.nvim_buf_get_lines(bufnr, 0, -1, false)
+      local buf_text = table.concat(lines, "\n")
+      if vim.bo[bufnr].eol then buf_text = buf_text .. "\n" end
+      local diff_out = vim.diff(base_text, buf_text, { result_type = "unified", ctxlen = 3 })
+      local diff_hunks = (diff_out and diff_out ~= "") and diff_mod.parse_hunks(diff_out) or {}
+      local conflict_hunks = diff_mod.find_conflicts(bufnr)
+      local merged = diff_mod.merge_hunks(diff_hunks, conflict_hunks)
+      local e = cache.get(bufnr)
+      if not e then return end
+      e.hunks = merged
+      e.dirty = false
+      signs.place(bufnr, merged)
+    end
+
+    if entry.base_text then
+      do_buf_diff(entry.base_text)
+    else
+      diff_mod.fetch_base(filepath, entry.root, function(base_text)
+        if refresh_gens[bufnr] ~= gen then return end  -- stale
+        local e = cache.get(bufnr)
+        if not e then return end
+        e.base_text = base_text
+        do_buf_diff(base_text)
+      end)
+    end
+    return
+  end
+
   diff_mod.get_change_id(entry.root, function(new_change_id)
+    if refresh_gens[bufnr] ~= gen then return end
     if not new_change_id then return end
 
     local stat = (vim.uv or vim.loop).fs_stat(filepath)
     local new_mtime = stat and stat.mtime.sec or 0
+
+    -- Fast path: parent unchanged and we have base_text.
+    -- The file on disk == buffer content we already diffed, so jj diff would
+    -- return the same hunks. Mutate mtime in place and skip the subprocess.
+    if entry.base_text and new_change_id == entry.change_id then
+      entry.mtime     = new_mtime
+      entry.dirty     = false
+      entry.change_id = new_change_id
+      return
+    end
 
     if not entry.dirty
       and new_change_id == entry.change_id
@@ -117,24 +175,24 @@ function M.refresh(bufnr)
     end
 
     diff_mod.run_diff(filepath, entry.root, function(diff_hunks)
+      if refresh_gens[bufnr] ~= gen then return end
       if not diff_hunks then
         signs.clear(bufnr)
         return
       end
-
       if not api.nvim_buf_is_valid(bufnr) then return end
-
       local conflict_hunks = diff_mod.find_conflicts(bufnr)
       local merged = diff_mod.merge_hunks(diff_hunks, conflict_hunks)
-
+      -- If the parent commit changed, the cached base is stale.
+      local new_base = new_change_id ~= entry.change_id and nil or entry.base_text
       cache.set(bufnr, {
         root      = entry.root,
         change_id = new_change_id,
         mtime     = new_mtime,
         hunks     = merged,
         dirty     = false,
+        base_text = new_base,
       })
-
       signs.place(bufnr, merged)
     end)
   end)

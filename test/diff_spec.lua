@@ -93,6 +93,28 @@ describe("diff.parse_hunks", function()
     eq("new line", hunks[1].added.lines[1])
   end)
 
+  it("ignores context lines when calculating added range", function()
+    local raw = table.concat({
+      "@@ -38,6 +38,8 @@",
+      " context1",
+      " context2",
+      " context3",
+      "+added line 1",
+      "+added line 2",
+      " context4",
+      " context5",
+      " context6",
+    }, "\n")
+    local hunks = diff.parse_hunks(raw)
+    eq(1, #hunks)
+    eq("add", hunks[1].type)
+    eq(41, hunks[1].added.start)
+    eq(42, hunks[1].vend)
+    eq(2, hunks[1].added.count)
+    eq(0, hunks[1].removed.count)
+    eq(2, #hunks[1].added.lines)
+  end)
+
   it("parses multiple hunks", function()
     local raw = table.concat({
       "@@ -0,0 +1,1 @@",

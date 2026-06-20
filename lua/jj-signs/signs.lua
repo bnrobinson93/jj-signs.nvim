@@ -267,6 +267,19 @@ function M.place(bufnr, hunks)
   if config.config.word_diff then
     require("jj-signs.word_diff").place_word_diff(bufnr, hunks)
   end
+
+  -- When using the decoration provider, on_line places ephemeral extmarks per
+  -- render pass rather than persisting them in the namespace. Nothing marks the
+  -- buffer dirty, so signs only appear on the next natural redraw (cursor move).
+  -- Force a full invalidating redraw on every window showing this buffer so
+  -- on_line fires immediately after sign state changes.
+  if use_provider then
+    for _, win in ipairs(api.nvim_list_wins()) do
+      if api.nvim_win_is_valid(win) and api.nvim_win_get_buf(win) == bufnr then
+        pcall(api.nvim__redraw, { win = win, valid = false })
+      end
+    end
+  end
 end
 
 return M

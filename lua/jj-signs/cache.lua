@@ -5,6 +5,7 @@
 --- @field hunks      JJSigns.Hunk[]
 --- @field dirty      boolean
 --- @field hunk_index { start: integer, vend: integer, sign_type: string }[]?
+--- @field base_text  string?  cached parent-revision content; nil = not yet fetched or invalidated
 
 --- @type table<integer, JJSigns.CacheEntry>
 local cache = {}

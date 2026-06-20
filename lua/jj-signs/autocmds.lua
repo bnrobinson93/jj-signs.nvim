@@ -62,6 +62,13 @@ function M.setup()
     end,
   })
 
+  api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "InsertEnter", "InsertLeave" }, {
+    group    = augroup,
+    callback = function(args)
+      M.schedule_refresh(args.buf)
+    end,
+  })
+
   -- Invalidate root cache when jj ops happen (repo-level changes)
   api.nvim_create_autocmd("BufWritePost", {
     group   = augroup,

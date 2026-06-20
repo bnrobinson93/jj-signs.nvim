@@ -80,6 +80,24 @@ function M.get_change_id(root, cb)
 	)
 end
 
+--- Fetch the parent revision's content for a file.
+--- Returns empty string for new files not yet in the parent.
+--- @param filepath string
+--- @param root string
+--- @param cb fun(base_text: string)
+function M.fetch_base(filepath, root, cb)
+	vim.system(
+		jj({ "file", "show", "-r", "@-", "--", filepath }),
+		{ text = true, cwd = root },
+		function(result)
+			local base = result.code == 0 and result.stdout or ""
+			vim.schedule(function()
+				cb(base)
+			end)
+		end
+	)
+end
+
 --- @param filepath string
 --- @param root string
 --- @param cb fun(hunks: JJSigns.Hunk[]?)
@@ -139,26 +157,51 @@ function M.parse_hunks(diff_output)
 
 	local hunks = {} --- @type JJSigns.Hunk[]
 	local current = nil --- @type JJSigns.Hunk?
+	local new_line = 0
+	local first_added = nil --- @type integer?
+	local last_added = nil --- @type integer?
+
+	local function finalize()
+		if not current then return end
+		current.removed.count = #current.removed.lines
+		if first_added ~= nil then
+			current.added.start = first_added
+			current.vend = last_added --[[@as integer]]
+			current.added.count = #current.added.lines
+		end
+		if #current.added.lines == 0 then
+			current.type = "delete"
+		elseif #current.removed.lines == 0 then
+			current.type = "add"
+		else
+			current.type = "change"
+		end
+		hunks[#hunks + 1] = current
+	end
 
 	for _, line in ipairs(vim.split(diff_output, "\n")) do
 		if vim.startswith(line, "@@") then
-			if current then
-				hunks[#hunks + 1] = current
-			end
+			finalize()
 			current = M.parse_diff_line(line)
+			new_line = current.added.start
+			first_added = nil
+			last_added = nil
 		elseif current then
 			local c = line:sub(1, 1)
 			if c == "+" then
+				if not first_added then first_added = new_line end
+				last_added = new_line
 				current.added.lines[#current.added.lines + 1] = line:sub(2)
+				new_line = new_line + 1
 			elseif c == "-" then
 				current.removed.lines[#current.removed.lines + 1] = line:sub(2)
+			elseif c == " " then
+				new_line = new_line + 1
 			end
 		end
 	end
 
-	if current then
-		hunks[#hunks + 1] = current
-	end
+	finalize()
 
 	return hunks
 end
