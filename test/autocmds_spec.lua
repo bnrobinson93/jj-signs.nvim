@@ -6,7 +6,7 @@ describe("autocmds.schedule_refresh visibility deferral", function()
   local BUF = 42
 
   -- saved real implementations
-  local real_api_get_buf_windows
+  local real_fn_win_findbuf
   local real_api_buf_is_valid
   local real_api_buf_line_count
   local real_bo
@@ -21,12 +21,12 @@ describe("autocmds.schedule_refresh visibility deferral", function()
     refreshed = {}
     win_count = 1
 
-    real_api_get_buf_windows = vim.api.nvim_get_buf_windows
+    real_fn_win_findbuf      = vim.fn.win_findbuf
     real_api_buf_is_valid    = vim.api.nvim_buf_is_valid
     real_api_buf_line_count  = vim.api.nvim_buf_line_count
     real_bo                  = vim.bo
 
-    vim.api.nvim_get_buf_windows = function(_)
+    vim.fn.win_findbuf = function(_)
       local out = {}
       for i = 1, win_count do out[i] = i end
       return out
@@ -46,7 +46,7 @@ describe("autocmds.schedule_refresh visibility deferral", function()
   end)
 
   after_each(function()
-    vim.api.nvim_get_buf_windows = real_api_get_buf_windows
+    vim.fn.win_findbuf            = real_fn_win_findbuf
     vim.api.nvim_buf_is_valid    = real_api_buf_is_valid
     vim.api.nvim_buf_line_count  = real_api_buf_line_count
     vim.bo                       = real_bo

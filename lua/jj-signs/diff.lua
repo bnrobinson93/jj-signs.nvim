@@ -91,7 +91,7 @@ function M.get_parent_ids(root, cb)
 				vim.schedule(function() cb(nil, nil) end)
 				return
 			end
-			local parts = vim.split(vim.trim(result.stdout), " ")
+			local parts = vim.split(vim.trim(result.stdout), "%s+", { trimempty = true })
 			vim.schedule(function() cb(parts[1], parts[2]) end)
 		end
 	)

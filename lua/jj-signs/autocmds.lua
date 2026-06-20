@@ -19,7 +19,7 @@ function M.schedule_refresh(bufnr)
 
   -- Defer when buffer is not visible in any window; WinEnter/BufWinEnter
   -- will re-trigger the refresh once it becomes viewable.
-  if #api.nvim_get_buf_windows(bufnr) == 0 then
+  if #vim.fn.win_findbuf(bufnr) == 0 then
     local entry = cache.get(bufnr)
     if entry then
       entry.update_on_view = true
