@@ -1,23 +1,18 @@
 local api = vim.api
 local config = require("jj-signs.config")
 local cache = require("jj-signs.cache")
+local async = require("jj-signs.async")
 
 local M = {}
 
--- Timer table keyed by bufnr for debouncing
-local timers = {} --- @type table<integer, uv_timer_t>
+-- Throttled refresh: one refresh runs at a time per buffer; a call arriving
+-- mid-flight queues exactly one follow-up so no state change is dropped.
+local throttled_refresh = async.throttle_async(
+  function(bufnr) require("jj-signs").refresh(bufnr) end,
+  function(bufnr) return bufnr end
+)
 
---- @param bufnr integer
-local function cancel_timer(bufnr)
-  local t = timers[bufnr]
-  if t then
-    t:stop()
-    t:close()
-    timers[bufnr] = nil
-  end
-end
-
---- Schedule a debounced refresh for bufnr.
+--- Schedule a refresh for bufnr.
 --- @param bufnr integer
 function M.schedule_refresh(bufnr)
   if not api.nvim_buf_is_valid(bufnr) then return end
@@ -46,22 +41,14 @@ function M.schedule_refresh(bufnr)
   local line_count = api.nvim_buf_line_count(bufnr)
   if line_count > config.config.max_file_length then return end
 
-  cancel_timer(bufnr)
-
-  local timer = (vim.uv or vim.loop).new_timer()
-  timers[bufnr] = timer
-  timer:start(config.config.update_debounce, 0, function()
-    cancel_timer(bufnr)
-    vim.schedule(function()
-      require("jj-signs").refresh(bufnr)
-    end)
-  end)
+  -- Buffer visible; fire throttled refresh
+  throttled_refresh(bufnr)
 end
 
+--- No-op: retained for callers (init.lua detach). Throttle replaces the
+--- per-buffer debounce timer, so there is nothing to cancel.
 --- @param bufnr integer
-function M.cancel(bufnr)
-  cancel_timer(bufnr)
-end
+function M.cancel(bufnr) end
 
 --- WinEnter/BufWinEnter callback: re-run a refresh that was deferred while the
 --- buffer had no window.

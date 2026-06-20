@@ -9,11 +9,6 @@ local hunks    = require("jj-signs.hunks")
 local autocmds = require("jj-signs.autocmds")
 local watcher  = require("jj-signs.watcher")
 
--- Generation counter per buffer. Incremented on every refresh() call so that
--- in-flight async callbacks from earlier calls can detect they are stale and
--- abort instead of clobbering fresher results.
-local refresh_gens = {} --- @type table<integer, integer>
-
 local M = {}
 
 --- @param opts JJSigns.Config?
@@ -116,7 +111,6 @@ end
 function M.detach(bufnr)
   bufnr = bufnr or api.nvim_get_current_buf()
   local entry = cache.get(bufnr)
-  refresh_gens[bufnr] = nil
   autocmds.cancel(bufnr)
   signs.clear(bufnr)
   cache.clear(bufnr)
@@ -156,16 +150,11 @@ function M.refresh(bufnr)
   local entry = cache.get(bufnr)
   if not entry then return end
 
-  -- Bump generation so any in-flight callbacks from a prior refresh abort.
-  local gen = (refresh_gens[bufnr] or 0) + 1
-  refresh_gens[bufnr] = gen
-
   -- Unsaved buffer: diff buffer content directly against cached parent so signs
   -- update live. Parent content is fetched once and cached in entry.base_text;
   -- subsequent TextChanged events run vim.diff() synchronously with no subprocess.
   if vim.bo[bufnr].modified then
     local function do_buf_diff(base_text)
-      if refresh_gens[bufnr] ~= gen then return end  -- stale
       if not api.nvim_buf_is_valid(bufnr) then return end
 
       local e = cache.get(bufnr)
@@ -188,7 +177,6 @@ function M.refresh(bufnr)
         local buf_narrow  = table.concat(vim.list_slice(lines, first + 1, last), "\n") .. "\n"
 
         diff_mod.diff_async(base_narrow, buf_narrow, { ctxlen = ctx }, function(diff_out)
-          if refresh_gens[bufnr] ~= gen then return end
           if not api.nvim_buf_is_valid(bufnr) then return end
           local e2 = cache.get(bufnr)
           if not e2 then return end
@@ -212,10 +200,6 @@ function M.refresh(bufnr)
       else
         -- Full diff fallback (first load or unknown range)
         diff_mod.diff_async(base_text, buf_text, { ctxlen = 3 }, function(diff_out)
-          -- Generation check INSIDE the callback (post-thread): stale callbacks
-          -- from a prior refresh must abort after the worker returns, not only
-          -- before dispatch. The check at the top of do_buf_diff is an early-exit.
-          if refresh_gens[bufnr] ~= gen then return end
           if not api.nvim_buf_is_valid(bufnr) then return end
           local diff_hunks = (diff_out and diff_out ~= "") and diff_mod.parse_hunks(diff_out) or {}
           local conflict_hunks = diff_mod.find_conflicts(bufnr)
@@ -231,7 +215,6 @@ function M.refresh(bufnr)
     end
 
     diff_mod.get_parent_ids(entry.root, function(new_pcid, new_ppid)
-      if refresh_gens[bufnr] ~= gen then return end  -- stale
       local e = cache.get(bufnr)
       if not e then return end
 
@@ -250,7 +233,6 @@ function M.refresh(bufnr)
           do_buf_diff(cached_base)
         else
           diff_mod.fetch_base(filepath, e.root, function(base_text)
-            if refresh_gens[bufnr] ~= gen then return end  -- stale
             local e2 = cache.get(bufnr)
             if not e2 then return end
             e2.base_text = base_text
@@ -266,7 +248,6 @@ function M.refresh(bufnr)
   end
 
   diff_mod.get_change_id(entry.root, function(new_change_id)
-    if refresh_gens[bufnr] ~= gen then return end
     if not new_change_id then return end
 
     local stat = (vim.uv or vim.loop).fs_stat(filepath)
@@ -290,7 +271,6 @@ function M.refresh(bufnr)
     end
 
     diff_mod.run_diff(filepath, entry.root, function(diff_hunks)
-      if refresh_gens[bufnr] ~= gen then return end
       if not diff_hunks then
         signs.clear(bufnr)
         return
