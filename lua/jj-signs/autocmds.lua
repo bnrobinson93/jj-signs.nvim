@@ -1,5 +1,6 @@
 local api = vim.api
 local config = require("jj-signs.config")
+local cache = require("jj-signs.cache")
 
 local M = {}
 
@@ -20,6 +21,22 @@ end
 --- @param bufnr integer
 function M.schedule_refresh(bufnr)
   if not api.nvim_buf_is_valid(bufnr) then return end
+
+  -- Defer when buffer is not visible in any window; WinEnter/BufWinEnter
+  -- will re-trigger the refresh once it becomes viewable.
+  if #api.nvim_get_buf_windows(bufnr) == 0 then
+    local entry = cache.get(bufnr)
+    if entry then
+      entry.update_on_view = true
+    end
+    return
+  end
+
+  -- Buffer is visible: any pending deferred refresh is now being serviced.
+  local entry = cache.get(bufnr)
+  if entry then
+    entry.update_on_view = false
+  end
 
   -- Skip non-normal buffers
   local bt = vim.bo[bufnr].buftype
@@ -46,6 +63,18 @@ function M.cancel(bufnr)
   cancel_timer(bufnr)
 end
 
+--- WinEnter/BufWinEnter callback: re-run a refresh that was deferred while the
+--- buffer had no window.
+--- @param args { buf: integer }
+function M._on_win_view(args)
+  local b = args.buf
+  local entry = cache.get(b)
+  if entry and entry.update_on_view then
+    entry.update_on_view = false
+    M.schedule_refresh(b)
+  end
+end
+
 function M.setup()
   local augroup = api.nvim_create_augroup("JJSigns", { clear = true })
 
@@ -60,6 +89,11 @@ function M.setup()
     callback = function(args)
       M.schedule_refresh(args.buf)
     end,
+  })
+
+  api.nvim_create_autocmd({ "WinEnter", "BufWinEnter" }, {
+    group    = augroup,
+    callback = M._on_win_view,
   })
 
   api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "InsertEnter", "InsertLeave" }, {

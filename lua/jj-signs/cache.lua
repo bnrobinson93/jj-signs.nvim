@@ -8,6 +8,7 @@
 --- @field base_text        string?  cached parent-revision content; nil = not yet fetched or invalidated
 --- @field parent_change_id string?  change_id of @- when base_text was fetched
 --- @field parent_commit_id string?  commit_id of @- when base_text was fetched
+--- @field update_on_view    boolean?  true when refresh was deferred because buffer had no window
 
 --- @type table<integer, JJSigns.CacheEntry>
 local cache = {}
