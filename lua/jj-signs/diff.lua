@@ -223,6 +223,55 @@ function M.parse_hunks(diff_output)
 	return hunks
 end
 
+--- Run vim.diff() off the main thread via the libuv thread pool.
+---
+--- uv.new_work(work_fn, after_fn) runs work_fn in a thread-pool worker with a
+--- fresh Lua VM: it cannot see upvalues, closures, or Neovim state. vim.diff()
+--- is a pure xdiff C call with no editor-state access, so it IS safe to call
+--- from a worker on Neovim 0.10+.
+---
+--- Fallback: on older builds vim.diff may be missing inside the worker. The
+--- worker detects this (or any pcall error) and signals "__no_diff__" back; the
+--- after_fn then runs vim.diff synchronously on the main thread via vim.schedule.
+---
+--- @param base_text string
+--- @param buf_text  string
+--- @param opts      table   same opts table passed to vim.diff() (ctxlen used)
+--- @param cb        fun(result: string?)
+function M.diff_async(base_text, buf_text, opts, cb)
+	local uv = vim.uv or vim.loop
+
+	local work = uv.new_work(
+		function(a, b, opts_str)
+			-- Worker thread: no access to upvalues/closures/vim state.
+			if type(vim) ~= "table" or type(vim.diff) ~= "function" then
+				return "__no_diff__", ""
+			end
+			-- Only ctxlen crosses the thread boundary (primitives only).
+			local o = { result_type = "unified", ctxlen = tonumber(opts_str) or 3 }
+			local ok, result = pcall(vim.diff, a, b, o)
+			if not ok then
+				return "__no_diff__", ""
+			end
+			return "ok", result or ""
+		end,
+		function(status, result)
+			if status ~= "ok" then
+				-- Worker lacks a usable vim.diff (older Neovim): run it on the
+				-- main thread instead.
+				vim.schedule(function()
+					local o = { result_type = "unified", ctxlen = tonumber(opts.ctxlen) or 3 }
+					local ok, r = pcall(vim.diff, base_text, buf_text, o)
+					cb((ok and r and r ~= "") and r or nil)
+				end)
+				return
+			end
+			cb(result ~= "" and result or nil)
+		end
+	)
+	work:queue(base_text, buf_text, tostring(opts.ctxlen or 3))
+end
+
 --- Scan buffer lines for JJ conflict markers and return conflict hunks.
 --- JJ conflicts use: <<<<<<< Conflict N of M
 --- @param bufnr integer

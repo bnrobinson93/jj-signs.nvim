@@ -139,15 +139,22 @@ function M.refresh(bufnr)
       local lines = api.nvim_buf_get_lines(bufnr, 0, -1, false)
       local buf_text = table.concat(lines, "\n")
       if vim.bo[bufnr].eol then buf_text = buf_text .. "\n" end
-      local diff_out = vim.diff(base_text, buf_text, { result_type = "unified", ctxlen = 3 })
-      local diff_hunks = (diff_out and diff_out ~= "") and diff_mod.parse_hunks(diff_out) or {}
-      local conflict_hunks = diff_mod.find_conflicts(bufnr)
-      local merged = diff_mod.merge_hunks(diff_hunks, conflict_hunks)
-      local e = cache.get(bufnr)
-      if not e then return end
-      e.hunks = merged
-      e.dirty = false
-      signs.place(bufnr, merged)
+
+      diff_mod.diff_async(base_text, buf_text, { ctxlen = 3 }, function(diff_out)
+        -- Generation check INSIDE the callback (post-thread): stale callbacks
+        -- from a prior refresh must abort after the worker returns, not only
+        -- before dispatch. The check at the top of do_buf_diff is an early-exit.
+        if refresh_gens[bufnr] ~= gen then return end
+        if not api.nvim_buf_is_valid(bufnr) then return end
+        local diff_hunks = (diff_out and diff_out ~= "") and diff_mod.parse_hunks(diff_out) or {}
+        local conflict_hunks = diff_mod.find_conflicts(bufnr)
+        local merged = diff_mod.merge_hunks(diff_hunks, conflict_hunks)
+        local e = cache.get(bufnr)
+        if not e then return end
+        e.hunks = merged
+        e.dirty = false
+        signs.place(bufnr, merged)
+      end)
     end
 
     diff_mod.get_parent_ids(entry.root, function(new_pcid, new_ppid)
