@@ -35,6 +35,8 @@ local subcommands = {
   "toggle_linehl",
   "toggle_word_diff",
   "toggle_deleted",
+  "setqflist",
+  "setloclist",
 }
 
 --- Resolve a subcommand name to its module function.

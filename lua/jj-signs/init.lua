@@ -53,6 +53,8 @@ local function default_keymaps(bufnr)
   map("n", "<leader>ghb", function() M.blame_line({ full = true }) end, "Blame line (popup)")
   map("n", "<leader>ghB", function() M.blame()           end, "Blame full file")
   map({"x", "o"}, "ih",  function() M.select_hunk(bufnr) end, "Select JJ hunk")
+  map("n", "<leader>ghq", function() M.setqflist("attached", { open = true }) end, "JJ hunks → quickfix")
+  map("n", "<leader>ghl", function() M.setloclist(0, { open = true })        end, "JJ hunks → loclist")
 end
 
 --- Attach to a buffer: detect jj repo, seed cache, apply keymaps, kick off first refresh.
@@ -421,6 +423,22 @@ function M.select_hunk(bufnr)
   local last  = first + math.max(hunk.added.count, 1) - 1
 
   vim.cmd("normal! " .. first .. "GV" .. last .. "G")
+end
+
+--- Populate the quickfix list with hunks across buffers. Drives list-based
+--- navigation and Trouble.nvim. Reads cached hunks only — no jj subprocess.
+--- @param target "attached"|integer|string|nil  "attached"/nil = all attached
+---   buffers, 0 = current buffer, otherwise a specific bufnr
+--- @param opts { open?: boolean, use_loc?: boolean }?
+function M.setqflist(target, opts)
+  require("jj-signs.qflist").setqflist(target, opts)
+end
+
+--- Populate the current window's location list with hunks.
+--- @param target "attached"|integer|string|nil  defaults to 0 (current buffer)
+--- @param opts { open?: boolean }?
+function M.setloclist(target, opts)
+  require("jj-signs.qflist").setloclist(target, opts)
 end
 
 --- Summary for statusline components.

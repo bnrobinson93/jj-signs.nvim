@@ -219,6 +219,8 @@ require("jj-signs").setup({
 | `toggle_linehl(value?)` | Toggle line highlighting; returns new state |
 | `toggle_word_diff(value?)` | Toggle inline word-diff; returns new state |
 | `toggle_deleted(value?)` | Toggle deleted-line virtual lines; returns new state |
+| `setqflist(target?, opts?)` | Send hunks to the quickfix list (see below) |
+| `setloclist(target?, opts?)` | Send hunks to the current window's location list |
 | `summary()` | Return `{ added, changed, deleted, conflicts }` |
 
 ## Commands
@@ -243,6 +245,8 @@ tab-completes:
 :JJSigns toggle_linehl
 :JJSigns toggle_word_diff
 :JJSigns toggle_deleted
+:JJSigns setqflist attached " hunks across all buffers → quickfix
+:JJSigns setloclist         " current buffer hunks → location list
 ```
 
 Each `toggle_*` flips the matching config flag and re-renders all attached
@@ -254,10 +258,44 @@ Positional args after the action are forwarded to the function (e.g.
 `restore_hunk`, `diffthis`, `diffthis_rev`, `blame_line`, `blame`, `select_hunk`, `refresh`,
 `refresh_all`, `attach`, `detach`, `detach_all`, `enable`, `disable`,
 `get_hunks`, `is_attached`, `toggle_current_line_blame`, `toggle_signs`,
-`toggle_numhl`, `toggle_linehl`, `toggle_word_diff`, `toggle_deleted`.
+`toggle_numhl`, `toggle_linehl`, `toggle_word_diff`, `toggle_deleted`,
+`setqflist`, `setloclist`.
 
 The command is registered before `setup()` runs; invoking it lazily initializes
 jj-signs with defaults if you have not called `setup()` yet.
+
+## Quickfix / loclist
+
+Collect hunks across buffers into the quickfix or location list for list-driven
+navigation (and [Trouble.nvim](https://github.com/folke/trouble.nvim)):
+
+```lua
+require("jj-signs").setqflist("attached", { open = true })  -- all attached buffers → quickfix
+require("jj-signs").setqflist(0)                              -- current buffer only
+require("jj-signs").setloclist(0, { open = true })           -- current buffer → loclist
+```
+
+The `target` selects which buffers contribute hunks:
+
+| `target` | Hunks from |
+|----------|------------|
+| `"attached"` / `nil` | every attached buffer |
+| `0` | the current buffer |
+| a `bufnr` | that specific buffer |
+
+`opts.open` opens the list after populating it (`:copen` / `:lopen`). For
+`setqflist`, `opts.use_loc` routes to the location list instead — `setloclist`
+is the thin wrapper that sets it. Items are built straight from cached hunks, so
+**no `jj` subprocess runs** and unsaved buffers are included from their live
+in-buffer diff. Each item carries `{ bufnr, lnum = hunk.added.start, text =
+"<type> <hunk header>" }`.
+
+Default keymaps: `<leader>ghq` (quickfix, all buffers) and `<leader>ghl`
+(loclist, current buffer). Also reachable as `:JJSigns setqflist attached` and
+`:JJSigns setloclist`.
+
+**Trouble.nvim**: after `setqflist`, open `:Trouble qflist` (or `:Trouble
+loclist` after `setloclist`) to browse the hunks in Trouble's UI.
 
 ## Highlights
 
