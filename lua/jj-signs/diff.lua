@@ -82,10 +82,11 @@ function M.get_change_id(root, cb)
 end
 
 --- @param root string
+--- @param rev string  revision to resolve as the comparison base (e.g. "@-")
 --- @param cb fun(parent_change_id: string?, parent_commit_id: string?)
-function M.get_parent_ids(root, cb)
+function M.get_parent_ids(root, rev, cb)
 	vim.system(
-		jj({ "log", "-r", "@-", "-T", 'change_id ++ " " ++ commit_id', "--no-graph", "--color=never" }),
+		jj({ "log", "-r", rev, "-T", 'change_id ++ " " ++ commit_id', "--no-graph", "--color=never" }),
 		{ text = true, cwd = root },
 		function(result)
 			if result.code ~= 0 or not result.stdout then
@@ -98,14 +99,15 @@ function M.get_parent_ids(root, cb)
 	)
 end
 
---- Fetch the parent revision's content for a file.
---- Returns empty string for new files not yet in the parent.
+--- Fetch the comparison-base revision's content for a file.
+--- Returns empty string for new files not yet in that revision.
 --- @param filepath string
 --- @param root string
+--- @param rev string  revision whose file content is the comparison base
 --- @param cb fun(base_text: string)
-function M.fetch_base(filepath, root, cb)
+function M.fetch_base(filepath, root, rev, cb)
 	vim.system(
-		jj({ "file", "show", "-r", "@-", "--", filepath }),
+		jj({ "file", "show", "-r", rev, "--", filepath }),
 		{ text = true, cwd = root },
 		function(result)
 			local base = result.code == 0 and result.stdout or ""
@@ -118,10 +120,17 @@ end
 
 --- @param filepath string
 --- @param root string
+--- @param rev string  comparison base revision ("@-" = default @ vs its parent)
 --- @param cb fun(hunks: JJSigns.Hunk[]?)
-function M.run_diff(filepath, root, cb)
+function M.run_diff(filepath, root, rev, cb)
+	-- Default base (@-) maps to `jj diff -r @` (working copy vs its parent) — kept
+	-- byte-for-byte. A non-default base needs an explicit from/to range so the
+	-- hunks reflect that revision rather than the parent.
+	local args = (rev == "@-")
+		and { "diff", "--git", "--color=never", "-r", "@", "--", filepath }
+		or  { "diff", "--git", "--color=never", "--from", rev, "--to", "@", "--", filepath }
 	vim.system(
-		jj({ "diff", "--git", "--color=never", "-r", "@", "--", filepath }),
+		jj(args),
 		{ text = true, cwd = root },
 		function(result)
 			if result.code ~= 0 then

@@ -138,7 +138,7 @@ describe("narrow diff path in refresh()", function()
     vim.schedule = function(fn) fn() end
 
     orig_get_parent_ids = diff.get_parent_ids
-    diff.get_parent_ids = function(_, cb) cb("pcid", "ppid") end
+    diff.get_parent_ids = function(_, _, cb) cb("pcid", "ppid") end
 
     -- Narrow diff returns a single-line change in the sliced region.
     orig_diff_async = diff.diff_async

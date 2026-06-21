@@ -77,6 +77,7 @@ function M.attach(bufnr)
       hunks       = {},
       dirty       = true,
       dirty_range = nil,
+      base_rev    = "@-",
     })
 
     -- Apply keymaps: user-supplied on_attach, or built-in defaults
@@ -135,7 +136,7 @@ function M.detach(bufnr)
   for buf, ent in pairs(cache.all()) do
     if ent.parent_change_id and ent.parent_commit_id then
       local fp = api.nvim_buf_get_name(buf)
-      active_keys[base_cache.key(fp, ent.parent_change_id, ent.parent_commit_id)] = true
+      active_keys[base_cache.key(fp, ent.parent_change_id, ent.parent_commit_id, ent.base_rev)] = true
     end
   end
   base_cache.evict_stale(active_keys)
@@ -236,7 +237,8 @@ function M.refresh(bufnr)
       end
     end
 
-    diff_mod.get_parent_ids(entry.root, function(new_pcid, new_ppid)
+    local base_rev = entry.base_rev or "@-"
+    diff_mod.get_parent_ids(entry.root, base_rev, function(new_pcid, new_ppid)
       local e = cache.get(bufnr)
       if not e then return end
 
@@ -249,18 +251,18 @@ function M.refresh(bufnr)
       if e.base_text then
         do_buf_diff(e.base_text)
       else
-        local cached_base = base_cache.get(filepath, new_pcid, new_ppid)
+        local cached_base = base_cache.get(filepath, new_pcid, new_ppid, base_rev)
         if cached_base then
           e.base_text = cached_base   -- keep local entry in sync
           do_buf_diff(cached_base)
         else
-          diff_mod.fetch_base(filepath, e.root, function(base_text)
+          diff_mod.fetch_base(filepath, e.root, base_rev, function(base_text)
             local e2 = cache.get(bufnr)
             if not e2 then return end
             e2.base_text = base_text
             e2.parent_change_id = new_pcid
             e2.parent_commit_id = new_ppid
-            base_cache.set(filepath, new_pcid, new_ppid, base_text)
+            base_cache.set(filepath, new_pcid, new_ppid, base_text, base_rev)
             do_buf_diff(base_text)
           end)
         end
@@ -292,7 +294,7 @@ function M.refresh(bufnr)
       return
     end
 
-    diff_mod.run_diff(filepath, entry.root, function(diff_hunks)
+    diff_mod.run_diff(filepath, entry.root, entry.base_rev or "@-", function(diff_hunks)
       if not diff_hunks then
         signs.clear(bufnr)
         return
@@ -308,6 +310,7 @@ function M.refresh(bufnr)
         dirty            = false,
         dirty_range      = nil,  -- file clean after write
         base_text        = entry.base_text,
+        base_rev         = entry.base_rev,
         parent_change_id = entry.parent_change_id,
         parent_commit_id = entry.parent_commit_id,
       })
@@ -315,6 +318,46 @@ function M.refresh(bufnr)
       status.update(bufnr, merged, new_change_id)
     end)
   end)
+end
+
+--- Point a buffer's comparison base at `rev` and force a refresh. Invalidates the
+--- cached base content and resolved parent ids so the next refresh re-fetches the
+--- file as it exists in `rev`. base_rev defaults to "@-" (parent of @); change_base
+--- is the per-buffer escape hatch for "what changed since <rev>" (e.g. a branch point).
+--- @param entry JJSigns.CacheEntry
+--- @param bufnr integer
+--- @param rev string
+local function apply_base(bufnr, entry, rev)
+  entry.base_rev         = rev
+  entry.base_text        = nil
+  entry.parent_change_id = nil
+  entry.parent_commit_id = nil
+  entry.dirty            = true
+  entry.dirty_range      = nil
+  M.refresh(bufnr)
+end
+
+--- Compare a buffer against `rev` instead of the default parent (@-).
+--- @param rev string  revision to use as the comparison base
+--- @param bufnr integer?  target buffer; defaults to current
+function M.change_base(rev, bufnr)
+  if not rev or rev == "" then
+    vim.notify("jj-signs: change_base requires a revision", vim.log.levels.WARN)
+    return
+  end
+  bufnr = bufnr or api.nvim_get_current_buf()
+  local entry = cache.get(bufnr)
+  if not entry then return end
+  apply_base(bufnr, entry, rev)
+end
+
+--- Restore the default comparison base (@-) for a buffer.
+--- @param bufnr integer?  target buffer; defaults to current
+function M.reset_base(bufnr)
+  bufnr = bufnr or api.nvim_get_current_buf()
+  local entry = cache.get(bufnr)
+  if not entry then return end
+  apply_base(bufnr, entry, "@-")
 end
 
 --- Read-only accessor: a copy of the cached hunks for a buffer. Returns an empty

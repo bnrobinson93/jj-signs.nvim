@@ -301,7 +301,7 @@ describe("diff.get_parent_ids", function()
       cb({ code = 0, stdout = "abc123 def456\n" })
     end
     local got_pcid, got_ppid
-    diff.get_parent_ids("/fake/root", function(pcid, ppid)
+    diff.get_parent_ids("/fake/root", "@-", function(pcid, ppid)
       got_pcid = pcid
       got_ppid = ppid
     end)
@@ -314,7 +314,7 @@ describe("diff.get_parent_ids", function()
       cb({ code = 1, stdout = nil })
     end
     local got_pcid, got_ppid = "sentinel", "sentinel"
-    diff.get_parent_ids("/fake/root", function(pcid, ppid)
+    diff.get_parent_ids("/fake/root", "@-", function(pcid, ppid)
       got_pcid = pcid
       got_ppid = ppid
     end)
@@ -327,7 +327,7 @@ describe("diff.get_parent_ids", function()
       cb({ code = 0, stdout = "  changeid   commitid  \n" })
     end
     local got_pcid, got_ppid
-    diff.get_parent_ids("/fake/root", function(pcid, ppid)
+    diff.get_parent_ids("/fake/root", "@-", function(pcid, ppid)
       got_pcid = pcid
       got_ppid = ppid
     end)

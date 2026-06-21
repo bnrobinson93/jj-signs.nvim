@@ -241,6 +241,8 @@ require("jj-signs").setup({
 | `select_hunk(bufnr?)` | Set visual selection to hunk lines |
 | `diffthis(rev?)` | Open vimdiff vs `rev` (default `"@-"`) |
 | `diffthis_rev()` | Prompt for revision, then open vimdiff |
+| `change_base(rev, bufnr?)` | Compare the buffer against `rev` instead of the default parent (`@-`). Invalidates the cached base and forces a refresh, so signs show "what changed since `rev`" (e.g. a branch point). Per-buffer. |
+| `reset_base(bufnr?)` | Restore the default comparison base (`@-`) for the buffer. |
 | `blame_line(opts?)` | Popup the cursor line's change description (`opts.full` adds the diff) |
 | `blame()` | Full-file blame in a scroll-bound side split |
 | `toggle_current_line_blame()` | Toggle inline blame |
@@ -282,6 +284,8 @@ tab-completes:
 :JJSigns nav_hunk next    " == require("jj-signs").nav_hunk("next")
 :JJSigns nav_hunk prev
 :JJSigns diffthis @--     " == require("jj-signs").diffthis("@--")
+:JJSigns change_base main " compare this buffer against 'main' instead of @-
+:JJSigns reset_base       " back to the default @- base
 :JJSigns preview_hunk
 :JJSigns preview_hunk_inline
 :JJSigns restore_hunk
@@ -304,7 +308,7 @@ optional explicit value, e.g. `require("jj-signs").toggle_signs(false)`.
 
 Positional args after the action are forwarded to the function (e.g.
 `nav_hunk next`, `diffthis @--`). Available actions: `nav_hunk`, `preview_hunk`,
-`restore_hunk`, `diffthis`, `diffthis_rev`, `blame_line`, `blame`, `select_hunk`, `refresh`,
+`restore_hunk`, `diffthis`, `diffthis_rev`, `change_base`, `reset_base`, `blame_line`, `blame`, `select_hunk`, `refresh`,
 `refresh_all`, `attach`, `detach`, `detach_all`, `enable`, `disable`,
 `get_hunks`, `is_attached`, `toggle_current_line_blame`, `toggle_signs`,
 `toggle_numhl`, `toggle_linehl`, `toggle_word_diff`, `toggle_deleted`,
@@ -386,7 +390,7 @@ require("jj-signs").setup({
 ## What It Does Not Do
 
 - No staging (JJ has no index)
-- No signs for changes other than `@` vs its parent
+- Default base is `@` vs its parent (`@-`); use `change_base <rev>` to compare against an arbitrary revision per buffer
 - No hunk-level CLI operations — restore uses the buffer API, diff uses a temp file
 
 ## Credits
