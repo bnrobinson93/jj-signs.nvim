@@ -50,6 +50,8 @@ local function default_keymaps(bufnr)
   map("n", "<leader>ghr", function() M.restore_hunk()    end, "Restore JJ hunk from @-")
   map("n", "<leader>ghd", function() M.diffthis()        end, "Diff this vs @-")
   map("n", "<leader>ghD", function() M.diffthis_rev()    end, "Diff this vs revision…")
+  map("n", "<leader>ghb", function() M.blame_line({ full = true }) end, "Blame line (popup)")
+  map("n", "<leader>ghB", function() M.blame()           end, "Blame full file")
   map({"x", "o"}, "ih",  function() M.select_hunk(bufnr) end, "Select JJ hunk")
 end
 
@@ -388,6 +390,21 @@ end
 
 function M.diffthis_rev()
   hunks.diffthis_rev()
+end
+
+--- Popup the full change description for the cursor line. Additive to (and
+--- independent of) the inline `current_line_blame` EOL virtual text.
+--- @param opts { full?: boolean }|string|nil  CLI passes "full" as a string
+function M.blame_line(opts)
+  if type(opts) == "string" then
+    opts = { full = (opts == "full" or opts == "true") }
+  end
+  require("jj-signs.blame").blame_line(opts)
+end
+
+--- Open a scroll-bound side split blaming the whole file.
+function M.blame()
+  require("jj-signs.blame").blame()
 end
 
 --- @param bufnr integer?

@@ -10,6 +10,8 @@ describe("cli.dispatch", function()
     eq("function", type(cli.dispatch("nav_hunk")))
     eq("function", type(cli.dispatch("refresh")))
     eq("function", type(cli.dispatch("toggle_current_line_blame")))
+    eq("function", type(cli.dispatch("blame_line")))
+    eq("function", type(cli.dispatch("blame")))
   end)
 
   it("returns the same function the module exports", function()

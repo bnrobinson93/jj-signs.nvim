@@ -88,6 +88,8 @@ Default keymaps are buffer-local and set during attach. They match [LazyVim's gi
 | `<leader>ghr`   | n       | Restore hunk to `@-` state             |
 | `<leader>ghd`   | n       | Diff current file vs `@-` in vimdiff   |
 | `<leader>ghD`   | n       | Diff vs a prompted revision             |
+| `<leader>ghb`   | n       | Blame line: change description popup    |
+| `<leader>ghB`   | n       | Blame full file in a side split         |
 | `ih`            | x, o    | Select hunk (inner hunk text object)   |
 
 `restore_hunk` applies a per-hunk restore using `nvim_buf_set_lines` — no subprocess, instant, and undoable with `u`.
@@ -125,6 +127,28 @@ Blame is sourced from `jj annotate` and cached per `change_id`. Toggle at runtim
 ```lua
 require("jj-signs").toggle_current_line_blame()
 ```
+
+### On-demand blame popup and full-file view
+
+Two **additive** blame modes complement (they do **not** replace) the inline
+`current_line_blame` virtual text above. All three share the same cached
+`jj annotate` data but render independently — you can leave `current_line_blame`
+off and still use these on demand.
+
+| Function | Keymap | What it does |
+|----------|--------|--------------|
+| `blame_line(opts?)` | `<leader>ghb` | Float showing the full change description for the cursor line, sourced from `jj show`. `opts.full` (default in the keymap) includes the diff; pass `{ full = false }` for the message only. Closes on cursor move. |
+| `blame()` | `<leader>ghB` | Opens a left side split annotating every line with `change_id • author • date`, scroll- and cursor-bound to the source window. Press `q` to close. |
+
+```lua
+require("jj-signs").blame_line()              -- message-only popup
+require("jj-signs").blame_line({ full = true })  -- popup with full diff
+require("jj-signs").blame()                    -- full-file blame split
+```
+
+These are independent of `current_line_blame`: the inline EOL blame stays
+exactly as configured; `blame_line`/`blame` add an on-demand popup and side
+view without changing it.
 
 ## Statusline Integration
 
@@ -187,6 +211,8 @@ require("jj-signs").setup({
 | `select_hunk(bufnr?)` | Set visual selection to hunk lines |
 | `diffthis(rev?)` | Open vimdiff vs `rev` (default `"@-"`) |
 | `diffthis_rev()` | Prompt for revision, then open vimdiff |
+| `blame_line(opts?)` | Popup the cursor line's change description (`opts.full` adds the diff) |
+| `blame()` | Full-file blame in a scroll-bound side split |
 | `toggle_current_line_blame()` | Toggle inline blame |
 | `toggle_signs(value?)` | Toggle the sign column; returns new state |
 | `toggle_numhl(value?)` | Toggle number-column highlighting; returns new state |
@@ -208,6 +234,8 @@ tab-completes:
 :JJSigns diffthis @--     " == require("jj-signs").diffthis("@--")
 :JJSigns preview_hunk
 :JJSigns restore_hunk
+:JJSigns blame_line full   " popup with diff; omit 'full' for message-only
+:JJSigns blame             " full-file blame split
 :JJSigns refresh
 :JJSigns toggle_current_line_blame
 :JJSigns toggle_signs
@@ -223,7 +251,7 @@ optional explicit value, e.g. `require("jj-signs").toggle_signs(false)`.
 
 Positional args after the action are forwarded to the function (e.g.
 `nav_hunk next`, `diffthis @--`). Available actions: `nav_hunk`, `preview_hunk`,
-`restore_hunk`, `diffthis`, `diffthis_rev`, `select_hunk`, `refresh`,
+`restore_hunk`, `diffthis`, `diffthis_rev`, `blame_line`, `blame`, `select_hunk`, `refresh`,
 `refresh_all`, `attach`, `detach`, `detach_all`, `enable`, `disable`,
 `get_hunks`, `is_attached`, `toggle_current_line_blame`, `toggle_signs`,
 `toggle_numhl`, `toggle_linehl`, `toggle_word_diff`, `toggle_deleted`.

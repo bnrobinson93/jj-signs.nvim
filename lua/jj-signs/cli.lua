@@ -17,6 +17,8 @@ local subcommands = {
   "restore_hunk",
   "diffthis",
   "diffthis_rev",
+  "blame_line",
+  "blame",
   "select_hunk",
   "refresh",
   "refresh_all",
