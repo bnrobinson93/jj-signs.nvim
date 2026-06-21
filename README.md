@@ -128,22 +128,43 @@ require("jj-signs").toggle_current_line_blame()
 
 ## Statusline Integration
 
+jj-signs maintains buffer-local variables (refreshed on every redraw of signs),
+mirroring gitsigns' `b:gitsigns_status*`:
+
+| Variable | Contents |
+|----------|----------|
+| `b:jjsigns_status_dict` | `{ added, changed, removed, conflicts, head }` |
+| `b:jjsigns_status`      | Formatted string, e.g. `"+3 ~1 -2"` (zero parts omitted) |
+| `b:jjsigns_head`        | Short `change_id` of `@` |
+
+Read the variable instead of calling a function each redraw:
+
 ```lua
 -- lualine component
 {
   function()
-    local s = require("jj-signs").summary()
-    local parts = {}
-    if s.added   > 0 then parts[#parts+1] = "+" .. s.added   end
-    if s.changed > 0 then parts[#parts+1] = "~" .. s.changed end
-    if s.deleted > 0 then parts[#parts+1] = "-" .. s.deleted end
-    return table.concat(parts, " ")
+    return vim.b.jjsigns_status or ""
   end,
   cond = function()
-    local s = require("jj-signs").summary()
-    return s.added + s.changed + s.deleted + s.conflicts > 0
+    local d = vim.b.jjsigns_status_dict
+    return d ~= nil and (d.added + d.changed + d.removed + d.conflicts) > 0
   end,
 }
+```
+
+The `b:jjsigns_status` string is built by the configurable `status_formatter`
+(default `"+N ~N -N"`, omitting any zero count):
+
+```lua
+require("jj-signs").setup({
+  status_formatter = function(d)
+    local parts = {}
+    if (d.added   or 0) > 0 then parts[#parts + 1] = "+" .. d.added   end
+    if (d.changed or 0) > 0 then parts[#parts + 1] = "~" .. d.changed end
+    if (d.removed or 0) > 0 then parts[#parts + 1] = "-" .. d.removed end
+    return table.concat(parts, " ")
+  end,
+})
 ```
 
 ## Public API

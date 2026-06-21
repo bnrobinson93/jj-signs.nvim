@@ -8,6 +8,7 @@ local signs    = require("jj-signs.signs")
 local hunks    = require("jj-signs.hunks")
 local autocmds = require("jj-signs.autocmds")
 local watcher  = require("jj-signs.watcher")
+local status   = require("jj-signs.status")
 
 local M = {}
 
@@ -117,6 +118,7 @@ function M.detach(bufnr)
   local entry = cache.get(bufnr)
   autocmds.cancel(bufnr)
   signs.clear(bufnr)
+  status.clear(bufnr)
   cache.clear(bufnr)
 
   -- Evict shared base_cache entries no longer referenced by any live buffer.
@@ -205,6 +207,7 @@ function M.refresh(bufnr)
           e2.dirty = false
           e2.dirty_range = nil
           signs.place(bufnr, merged)
+          status.update(bufnr, merged, e2.change_id)
         end)
       else
         -- Full diff fallback (first load or unknown range)
@@ -219,6 +222,7 @@ function M.refresh(bufnr)
           e2.dirty = false
           e2.dirty_range = nil
           signs.place(bufnr, merged)
+          status.update(bufnr, merged, e2.change_id)
         end)
       end
     end
@@ -299,6 +303,7 @@ function M.refresh(bufnr)
         parent_commit_id = entry.parent_commit_id,
       })
       signs.place(bufnr, merged)
+      status.update(bufnr, merged, new_change_id)
     end)
   end)
 end

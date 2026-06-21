@@ -10,6 +10,7 @@ local M = {}
 --- @field sign_priority   integer
 --- @field jj_cmd          string
 --- @field jj_repo         string?
+--- @field status_formatter fun(dict: table): string
 --- @field on_attach?      fun(bufnr: integer): boolean?
 
 M.defaults = {
@@ -42,6 +43,15 @@ M.defaults = {
   -- Optional: passed as `jj --repository <path>`. Leave nil to rely on cwd-based
   -- workspace detection, which handles all standard JJ workspace setups.
   jj_repo         = nil,
+  -- Builds the b:jjsigns_status string from b:jjsigns_status_dict. Default emits
+  -- "+N ~N -N", omitting any zero part. Override to customize statusline output.
+  status_formatter = function(d)
+    local parts = {}
+    if (d.added   or 0) > 0 then parts[#parts + 1] = "+" .. d.added   end
+    if (d.changed or 0) > 0 then parts[#parts + 1] = "~" .. d.changed end
+    if (d.removed or 0) > 0 then parts[#parts + 1] = "-" .. d.removed end
+    return table.concat(parts, " ")
+  end,
   use_decoration_provider = true,
   -- Callback invoked after attaching to a buffer. Set up buffer-local keymaps here.
   -- Return false to cancel the attach. When nil, built-in default keymaps are used.
