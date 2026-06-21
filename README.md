@@ -163,6 +163,31 @@ require("jj-signs").toggle_current_line_blame()
 | `toggle_current_line_blame()` | Toggle inline blame |
 | `summary()` | Return `{ added, changed, deleted, conflicts }` |
 
+## Commands
+
+`:JJSigns <action> [args...]` runs any of the public actions from the command
+line — the command-line equivalent of the Lua API table above. The action name
+tab-completes:
+
+```vim
+:JJSigns <Tab>            " list actions
+:JJSigns nav_hunk next    " == require("jj-signs").nav_hunk("next")
+:JJSigns nav_hunk prev
+:JJSigns diffthis @--     " == require("jj-signs").diffthis("@--")
+:JJSigns preview_hunk
+:JJSigns restore_hunk
+:JJSigns refresh
+:JJSigns toggle_current_line_blame
+```
+
+Positional args after the action are forwarded to the function (e.g.
+`nav_hunk next`, `diffthis @--`). Available actions: `nav_hunk`, `preview_hunk`,
+`restore_hunk`, `diffthis`, `diffthis_rev`, `select_hunk`, `refresh`, `attach`,
+`detach`, `toggle_current_line_blame`.
+
+The command is registered before `setup()` runs; invoking it lazily initializes
+jj-signs with defaults if you have not called `setup()` yet.
+
 ## Highlights
 
 Default highlight groups link to standard Neovim diff groups so any colorscheme works:

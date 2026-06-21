@@ -14,6 +14,10 @@ local M = {}
 --- @param opts JJSigns.Config?
 function M.setup(opts)
   config.setup(opts)
+  M._initialized = true
+
+  -- Register the :JJSigns command (also registered in plugin/ pre-setup).
+  require("jj-signs.cli").create_command()
 
   if vim.fn.executable(config.config.jj_cmd) == 0 then
     vim.notify("jj-signs: '" .. config.config.jj_cmd .. "' not found in PATH", vim.log.levels.WARN)
