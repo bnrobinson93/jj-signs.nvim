@@ -95,6 +95,40 @@ describe("diff.parse_hunks", function()
     eq("new line", hunks[1].added.lines[1])
   end)
 
+  it("tracks exact added line numbers in lnums", function()
+    local raw = table.concat({
+      "@@ -5,1 +5,1 @@",
+      "-old",
+      "+new",
+    }, "\n")
+    local hunks = diff.parse_hunks(raw)
+    eq(1, #hunks)
+    eq({ 5 }, hunks[1].added.lnums)
+  end)
+
+  it("tracks non-contiguous added line numbers in merged hunks", function()
+    local raw = table.concat({
+      "@@ -1,10 +1,10 @@",
+      " context",
+      " context",
+      "-old A",
+      "+new A",
+      " context",
+      " context",
+      " context",
+      " context",
+      "-old B",
+      "+new B",
+      " context",
+    }, "\n")
+    local hunks = diff.parse_hunks(raw)
+    eq(1, #hunks)
+    -- new A is at new-file line 3 (after 2 context), new B at line 8
+    eq({ 3, 8 }, hunks[1].added.lnums)
+    eq(3, hunks[1].added.start)
+    eq(8, hunks[1].vend)
+  end)
+
   it("ignores context lines when calculating added range", function()
     local raw = table.concat({
       "@@ -38,6 +38,8 @@",

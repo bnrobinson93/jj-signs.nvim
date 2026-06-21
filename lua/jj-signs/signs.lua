@@ -93,7 +93,16 @@ local function build_hunk_index(hunks)
     local start_l = hunk.added.start == 0 and 1 or hunk.added.start
     local end_l   = (hunk.type == "delete" or hunk.type == "topdelete") and start_l or hunk.vend
 
-    index[#index + 1] = { start = start_l, vend = end_l, sign_type = sign_type }
+    -- Build a set of exact changed line numbers to avoid signing context lines
+    -- within merged hunks. Nil means "no filtering" (delete/topdelete, conflicts).
+    local lnum_set = nil
+    local lnums = hunk.added.lnums
+    if lnums and #lnums > 0 then
+      lnum_set = {}
+      for _, l in ipairs(lnums) do lnum_set[l] = true end
+    end
+
+    index[#index + 1] = { start = start_l, vend = end_l, sign_type = sign_type, lnum_set = lnum_set }
   end
   table.sort(index, function(a, b) return a.start < b.start end)
   return index
@@ -109,6 +118,8 @@ local function find_sign_at(lnum, index)
     elseif lnum > entry.vend then
       lo = mid + 1
     else
+      -- Skip context lines within merged hunks
+      if entry.lnum_set and not entry.lnum_set[lnum] then return nil end
       return entry
     end
   end
@@ -235,17 +246,16 @@ function M.place(bufnr, hunks)
       pcall(api.nvim_buf_set_extmark, bufnr, ns, lnum - 1, 0, opts)
     end
 
-    if sign_type == "add" then
-      for l = hunk.added.start, hunk.vend do
-        if l >= 1 and l <= line_count then place(l, "add") end
-      end
-    elseif sign_type == "change" then
-      for l = hunk.added.start, hunk.vend do
-        if l >= 1 and l <= line_count then place(l, "change") end
-      end
-    elseif sign_type == "changedelete" then
-      for l = hunk.added.start, hunk.vend do
-        if l >= 1 and l <= line_count then place(l, "changedelete") end
+    if sign_type == "add" or sign_type == "change" or sign_type == "changedelete" then
+      local lnums = hunk.added.lnums
+      if lnums then
+        for _, l in ipairs(lnums) do
+          if l >= 1 and l <= line_count then place(l, sign_type) end
+        end
+      else
+        for l = hunk.added.start, hunk.vend do
+          if l >= 1 and l <= line_count then place(l, sign_type) end
+        end
       end
     elseif sign_type == "delete" then
       local lnum = math.min(hunk.added.start, line_count)

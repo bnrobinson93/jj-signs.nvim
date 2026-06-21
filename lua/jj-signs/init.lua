@@ -186,6 +186,11 @@ function M.refresh(bufnr)
             hk.added.start   = hk.added.start   + first
             hk.vend          = hk.vend          + first
             hk.removed.start = hk.removed.start + first
+            if hk.added.lnums then
+              for i, l in ipairs(hk.added.lnums) do
+                hk.added.lnums[i] = l + first
+              end
+            end
           end
           -- Merge partial hunks into cached hunk list: replace hunks that overlap
           -- the dirty range; keep others unchanged.

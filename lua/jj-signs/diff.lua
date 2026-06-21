@@ -6,6 +6,7 @@ local config = require("jj-signs.config")
 --- @field start integer
 --- @field count integer
 --- @field lines string[]
+--- @field lnums integer[]  exact line numbers (1-based) for each entry in `lines`
 
 --- @class JJSigns.Hunk
 --- @field type    JJSigns.HunkType
@@ -156,8 +157,8 @@ function M.parse_diff_line(line)
 
 	--- @type JJSigns.Hunk
 	local hunk = {
-		removed = { start = old_start, count = old_count, lines = {} },
-		added = { start = new_start, count = new_count, lines = {} },
+		removed = { start = old_start, count = old_count, lines = {}, lnums = {} },
+		added = { start = new_start, count = new_count, lines = {}, lnums = {} },
 		head = line,
 		vend = new_start + math.max(new_count - 1, 0),
 		type = new_count == 0 and "delete" or old_count == 0 and "add" or "change",
@@ -209,6 +210,7 @@ function M.parse_hunks(diff_output)
 				if not first_added then first_added = new_line end
 				last_added = new_line
 				current.added.lines[#current.added.lines + 1] = line:sub(2)
+				current.added.lnums[#current.added.lnums + 1] = new_line
 				new_line = new_line + 1
 			elseif c == "-" then
 				current.removed.lines[#current.removed.lines + 1] = line:sub(2)
@@ -266,7 +268,9 @@ function M.diff_async(base_text, buf_text, opts, cb)
 				end)
 				return
 			end
-			cb(result ~= "" and result or nil)
+			vim.schedule(function()
+				cb(result ~= "" and result or nil)
+			end)
 		end
 	)
 	work:queue(base_text, buf_text, tostring(opts.ctxlen or 3))

@@ -74,6 +74,44 @@ describe("signs.build_hunk_index", function()
   end)
 end)
 
+describe("signs.build_hunk_index with lnums (merged hunk)", function()
+  it("skips context lines when lnums present", function()
+    local hunk = {
+      type    = "change",
+      head    = "",
+      added   = { start = 3, count = 2, lines = {}, lnums = { 3, 8 } },
+      removed = { start = 3, count = 2, lines = {}, lnums = {} },
+      vend    = 8,
+    }
+    local idx = build({ hunk })
+    eq(1, #idx)
+    -- Range still covers full merged span for binary-search bucketing
+    eq(3, idx[1].start)
+    eq(8, idx[1].vend)
+    -- But context lines within the span are filtered
+    assert.is_not_nil(find(3, idx))
+    assert.is_not_nil(find(8, idx))
+    assert.is_nil(find(4, idx))
+    assert.is_nil(find(5, idx))
+    assert.is_nil(find(6, idx))
+    assert.is_nil(find(7, idx))
+  end)
+
+  it("does not filter when lnums absent (conflict hunks, legacy)", function()
+    local hunk = {
+      type    = "conflict",
+      head    = "conflict",
+      added   = { start = 2, count = 3, lines = {} },
+      removed = { start = 2, count = 3, lines = {} },
+      vend    = 4,
+    }
+    local idx = build({ hunk })
+    assert.is_not_nil(find(2, idx))
+    assert.is_not_nil(find(3, idx))
+    assert.is_not_nil(find(4, idx))
+  end)
+end)
+
 describe("signs.find_sign_at", function()
   local idx
 
