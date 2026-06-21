@@ -46,7 +46,8 @@ local function default_keymaps(bufnr)
   map("n", "[h",          function() M.nav_hunk("prev")  end, "Prev JJ hunk")
   map("n", "]H",          function() M.nav_hunk("last")  end, "Last JJ hunk")
   map("n", "[H",          function() M.nav_hunk("first") end, "First JJ hunk")
-  map("n", "<leader>ghp", function() M.preview_hunk()    end, "Preview JJ hunk")
+  map("n", "<leader>ghp", function() M.preview_hunk()        end, "Preview JJ hunk")
+  map("n", "<leader>ghP", function() M.preview_hunk_inline() end, "Preview JJ hunk (inline)")
   map("n", "<leader>ghr", function() M.restore_hunk()    end, "Restore JJ hunk from @-")
   map("n", "<leader>ghd", function() M.diffthis()        end, "Diff this vs @-")
   map("n", "<leader>ghD", function() M.diffthis_rev()    end, "Diff this vs revision…")
@@ -374,12 +375,18 @@ function M.enable()
 end
 
 --- @param direction "next" | "prev" | "first" | "last"
-function M.nav_hunk(direction)
-  hunks.nav_hunk(direction)
+--- @param opts? { wrap?: boolean, preview?: boolean|"inline", foldopen?: boolean, count?: integer, navigation_message?: boolean }
+function M.nav_hunk(direction, opts)
+  hunks.nav_hunk(direction, opts)
 end
 
 function M.preview_hunk()
   hunks.preview_hunk()
+end
+
+--- Inline (virtual-line) preview of the hunk under cursor; no floating window.
+function M.preview_hunk_inline()
+  hunks.preview_hunk_inline()
 end
 
 function M.restore_hunk()

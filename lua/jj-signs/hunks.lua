@@ -7,6 +7,9 @@ local cache = require("jj-signs.cache")
 
 local M = {}
 
+--- Dedicated namespace for inline preview marks, cleared on the next CursorMoved.
+local preview_ns = api.nvim_create_namespace("jj-signs-preview-inline")
+
 --- @param lnum  integer
 --- @param hunks JJSigns.Hunk[]?
 --- @return JJSigns.Hunk?, integer?
@@ -83,9 +86,29 @@ function M.get_summary(hunks)
   return s
 end
 
+--- The buffer line to land on for a hunk: delete/topdelete have no added lines,
+--- so clamp to the line below the deletion (>= 1).
+--- @param hunk JJSigns.Hunk
+--- @return integer
+local function hunk_target_line(hunk)
+  if hunk.type == "delete" or hunk.type == "topdelete" then
+    return math.max(1, hunk.added.start)
+  end
+  return hunk.added.start
+end
+
+--- Resolve an opts value, falling back to the configured `nav` default.
+local function nav_opt(opts, key)
+  if opts[key] ~= nil then return opts[key] end
+  local nav = config.config.nav or {}
+  return nav[key]
+end
+
 --- Jump to next/prev/first/last hunk in the current buffer.
 --- @param direction "next" | "prev" | "first" | "last"
-function M.nav_hunk(direction)
+--- @param opts? { wrap?: boolean, preview?: boolean|"inline", foldopen?: boolean, count?: integer, navigation_message?: boolean }
+function M.nav_hunk(direction, opts)
+  opts = opts or {}
   local bufnr = api.nvim_get_current_buf()
   local entry = cache.get(bufnr)
   if not entry or #entry.hunks == 0 then
@@ -93,15 +116,40 @@ function M.nav_hunk(direction)
     return
   end
 
+  local wrap = nav_opt(opts, "wrap")
+  if wrap == nil then wrap = true end
+  local count = math.max(opts.count or 1, 1)
+
+  -- Advance `count` hunks, re-seeding from each landing line so successive
+  -- next/prev steps move hunk-by-hunk (count is a no-op for first/last).
   local lnum = api.nvim_win_get_cursor(0)[1]
-  local idx = M.find_nearest_hunk(lnum, entry.hunks, direction, true)
+  local idx
+  for _ = 1, count do
+    local next_idx = M.find_nearest_hunk(lnum, entry.hunks, direction, wrap)
+    if not next_idx then break end
+    idx = next_idx
+    lnum = hunk_target_line(entry.hunks[idx])
+  end
   if not idx then return end
 
-  local hunk = entry.hunks[idx]
-  local target = (hunk.type == "delete" or hunk.type == "topdelete")
-    and math.max(1, hunk.added.start)
-    or hunk.added.start
-  api.nvim_win_set_cursor(0, { target, 0 })
+  api.nvim_win_set_cursor(0, { lnum, 0 })
+
+  local foldopen = nav_opt(opts, "foldopen")
+  if foldopen == nil then foldopen = true end
+  if foldopen then vim.cmd("normal! zv") end
+
+  local nav_msg = nav_opt(opts, "navigation_message")
+  if nav_msg == nil then nav_msg = true end
+  if nav_msg then
+    api.nvim_echo({ { ("Hunk %d of %d"):format(idx, #entry.hunks) } }, false, {})
+  end
+
+  local preview = nav_opt(opts, "preview")
+  if preview == "inline" then
+    M.preview_hunk_inline()
+  elseif preview then
+    M.preview_hunk()
+  end
 end
 
 --- Open a floating preview of the hunk under cursor.
@@ -139,14 +187,15 @@ function M.preview_hunk()
   end
   width = math.min(math.max(width + 2, 20), 80)
 
+  local pc = config.config.preview_config or {}
   local win = api.nvim_open_win(float_buf, false, {
-    relative = "cursor",
-    row = 1,
-    col = 0,
-    width = width,
-    height = math.min(#lines, 20),
-    style = "minimal",
-    border = "rounded",
+    relative = pc.relative or "cursor",
+    row      = pc.row or 1,
+    col      = pc.col or 0,
+    width    = width,
+    height   = math.min(#lines, 20),
+    style    = pc.style or "minimal",
+    border   = pc.border or "rounded",
   })
 
   -- Close on any cursor move or buffer leave
@@ -155,6 +204,68 @@ function M.preview_hunk()
     callback = function()
       if api.nvim_win_is_valid(win) then
         api.nvim_win_close(win, true)
+      end
+    end,
+  })
+end
+
+--- Inline preview of the hunk under cursor: render `removed.lines` as dimmed
+--- virtual lines above the hunk and highlight the added lines, all in a
+--- dedicated namespace cleared on the next CursorMoved. No floating window.
+--- Mirrors the virt_lines + namespace pattern in signs.lua place_deleted_lines.
+function M.preview_hunk_inline()
+  local bufnr = api.nvim_get_current_buf()
+  local entry = cache.get(bufnr)
+  if not entry or #entry.hunks == 0 then return end
+
+  local lnum = api.nvim_win_get_cursor(0)[1]
+  local hunk = M.find_hunk(lnum, entry.hunks)
+  if not hunk then
+    vim.notify("jj-signs: cursor not on a hunk", vim.log.levels.INFO)
+    return
+  end
+
+  api.nvim_buf_clear_namespace(bufnr, preview_ns, 0, -1)
+  local line_count = api.nvim_buf_line_count(bufnr)
+
+  -- Removed lines as dimmed virt_lines above the hunk.
+  if #hunk.removed.lines > 0 then
+    local anchor
+    if hunk.type == "delete" or hunk.type == "topdelete" then
+      anchor = hunk.added.start == 0 and 0 or hunk.added.start
+    else
+      anchor = hunk.added.start - 1
+    end
+    anchor = math.max(math.min(anchor, line_count - 1), 0)
+
+    local virt = {}
+    for _, l in ipairs(hunk.removed.lines) do
+      virt[#virt + 1] = { { l, "JJSignsDeleteVirtLn" } }
+    end
+
+    pcall(api.nvim_buf_set_extmark, bufnr, preview_ns, anchor, 0, {
+      virt_lines       = virt,
+      virt_lines_above = true,
+    })
+  end
+
+  -- Highlight the added lines of the hunk.
+  if hunk.added.count > 0 then
+    for l = math.max(hunk.added.start, 1), hunk.vend do
+      if l >= 1 and l <= line_count then
+        pcall(api.nvim_buf_set_extmark, bufnr, preview_ns, l - 1, 0, {
+          line_hl_group = "JJSignsAddLn",
+        })
+      end
+    end
+  end
+
+  -- Clear the preview on the next cursor move.
+  api.nvim_create_autocmd("CursorMoved", {
+    once = true,
+    callback = function()
+      if api.nvim_buf_is_valid(bufnr) then
+        api.nvim_buf_clear_namespace(bufnr, preview_ns, 0, -1)
       end
     end,
   })

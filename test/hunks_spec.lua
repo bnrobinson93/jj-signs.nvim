@@ -260,3 +260,109 @@ describe("hunks.restore_hunk", function()
     eq(original, get_lines(bufnr))
   end)
 end)
+
+describe("hunks.preview_hunk_inline", function()
+  local cache = require("jj-signs.cache")
+  local api   = vim.api
+  local preview_ns = api.nvim_create_namespace("jj-signs-preview-inline")
+
+  after_each(function()
+    for _, bufnr in ipairs(api.nvim_list_bufs()) do
+      api.nvim_buf_clear_namespace(bufnr, preview_ns, 0, -1)
+      cache.clear(bufnr)
+    end
+  end)
+
+  it("places removed lines as virt_lines above a change hunk", function()
+    local hunk = {
+      type    = "change",
+      head    = "",
+      added   = { start = 2, count = 1, lines = { "new line" } },
+      removed = { start = 2, count = 2, lines = { "old1", "old2" } },
+      vend    = 2,
+    }
+    local bufnr = api.nvim_create_buf(false, true)
+    api.nvim_buf_set_lines(bufnr, 0, -1, false, { "line1", "new line", "line3" })
+    cache.set(bufnr, { root = "/tmp", change_id = "t", mtime = 0, hunks = { hunk }, dirty = false })
+    api.nvim_set_current_buf(bufnr)
+    api.nvim_win_set_cursor(0, { 2, 0 })
+
+    M.preview_hunk_inline()
+
+    local marks = api.nvim_buf_get_extmarks(bufnr, preview_ns, 0, -1, { details = true })
+    local virt_mark
+    for _, m in ipairs(marks) do
+      if m[4] and m[4].virt_lines then virt_mark = m end
+    end
+    assert.is_not_nil(virt_mark)
+    eq(2, #virt_mark[4].virt_lines)              -- two removed lines
+    eq("old1", virt_mark[4].virt_lines[1][1][1]) -- first removed line text
+    eq(true, virt_mark[4].virt_lines_above)
+  end)
+
+  it("does nothing when cursor is not on a hunk", function()
+    local hunk = {
+      type    = "change",
+      head    = "",
+      added   = { start = 5, count = 1, lines = { "new" } },
+      removed = { start = 5, count = 1, lines = { "old" } },
+      vend    = 5,
+    }
+    local bufnr = api.nvim_create_buf(false, true)
+    api.nvim_buf_set_lines(bufnr, 0, -1, false, { "a", "b", "c" })
+    cache.set(bufnr, { root = "/tmp", change_id = "t", mtime = 0, hunks = { hunk }, dirty = false })
+    api.nvim_set_current_buf(bufnr)
+    api.nvim_win_set_cursor(0, { 1, 0 })
+
+    M.preview_hunk_inline()
+
+    local marks = api.nvim_buf_get_extmarks(bufnr, preview_ns, 0, -1, {})
+    eq(0, #marks)
+  end)
+end)
+
+describe("hunks.nav_hunk", function()
+  local cache = require("jj-signs.cache")
+  local api   = vim.api
+
+  -- Buffer with 20 lines and hunks at lines 3, 8, 15.
+  local function make_nav_buf(cursor)
+    local lines = {}
+    for i = 1, 20 do lines[i] = "line" .. i end
+    local hunks = {
+      mk_hunk("add",    3, 1, 0, 0),  -- line 3
+      mk_hunk("change", 8, 2, 8, 2),  -- lines 8-9
+      mk_hunk("add",   15, 1, 0, 0),  -- line 15
+    }
+    local bufnr = api.nvim_create_buf(false, true)
+    api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+    cache.set(bufnr, { root = "/tmp", change_id = "t", mtime = 0, hunks = hunks, dirty = false })
+    api.nvim_set_current_buf(bufnr)
+    api.nvim_win_set_cursor(0, { cursor, 0 })
+    return bufnr
+  end
+
+  after_each(function()
+    for _, bufnr in ipairs(api.nvim_list_bufs()) do
+      cache.clear(bufnr)
+    end
+  end)
+
+  it("respects wrap=false at the last-hunk boundary", function()
+    make_nav_buf(15)  -- cursor on last hunk
+    M.nav_hunk("next", { wrap = false, navigation_message = false })
+    eq(15, api.nvim_win_get_cursor(0)[1])  -- no movement, no wrap to first
+  end)
+
+  it("wraps to first when wrap=true at the last-hunk boundary", function()
+    make_nav_buf(15)
+    M.nav_hunk("next", { wrap = true, navigation_message = false })
+    eq(3, api.nvim_win_get_cursor(0)[1])
+  end)
+
+  it("count skips N hunks", function()
+    make_nav_buf(1)  -- before first hunk
+    M.nav_hunk("next", { count = 2, navigation_message = false })
+    eq(8, api.nvim_win_get_cursor(0)[1])  -- hunk1 then hunk2
+  end)
+end)

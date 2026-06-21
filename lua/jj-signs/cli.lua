@@ -14,6 +14,7 @@ local M = {}
 local subcommands = {
   "nav_hunk",
   "preview_hunk",
+  "preview_hunk_inline",
   "restore_hunk",
   "diffthis",
   "diffthis_rev",

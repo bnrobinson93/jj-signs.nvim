@@ -55,6 +55,24 @@ require("jj-signs").setup({
   max_file_length = 40000,
   sign_priority   = 6,
   use_decoration_provider = true,  -- render signs lazily for visible lines only
+
+  -- Floating preview_hunk() window appearance. preview_hunk_inline() ignores
+  -- this (it draws virtual lines in-buffer, no float).
+  preview_config = {
+    border   = "rounded",
+    style    = "minimal",
+    relative = "cursor",
+    row      = 1,
+    col      = 0,
+  },
+  -- nav_hunk() defaults; each is overridable per call via the opts argument.
+  nav = {
+    wrap               = true,   -- wrap around buffer ends
+    navigation_message = true,   -- echo "Hunk N of M" after a jump
+    foldopen           = true,   -- open folds at the destination
+    preview            = false,  -- true = float, "inline" = virtual lines
+  },
+
   jj_cmd          = "jj",
   -- Optional: passed as `jj --repository <path>` to every jj call.
   -- Leave nil — cwd-based workspace detection handles all standard JJ setups.
@@ -85,6 +103,7 @@ Default keymaps are buffer-local and set during attach. They match [LazyVim's gi
 | `]H`            | n       | Jump to last hunk                       |
 | `[H`            | n       | Jump to first hunk                      |
 | `<leader>ghp`   | n       | Preview hunk in floating window         |
+| `<leader>ghP`   | n       | Preview hunk inline (virtual lines)     |
 | `<leader>ghr`   | n       | Restore hunk to `@-` state             |
 | `<leader>ghd`   | n       | Diff current file vs `@-` in vimdiff   |
 | `<leader>ghD`   | n       | Diff vs a prompted revision             |
@@ -205,8 +224,9 @@ require("jj-signs").setup({
 | `disable()` | Globally disable: detach all and skip auto-attach |
 | `is_attached(bufnr?)` | Whether jj-signs is attached to the buffer |
 | `get_hunks(bufnr?)` | Copy of the cached hunks (read-only accessor) |
-| `nav_hunk(direction)` | Navigate: `"next"` `"prev"` `"first"` `"last"` |
+| `nav_hunk(direction, opts?)` | Navigate: `"next"` `"prev"` `"first"` `"last"`. `opts` (all optional): `wrap`, `preview`, `foldopen`, `count`, `navigation_message` — see below |
 | `preview_hunk()` | Float showing removed/added lines |
+| `preview_hunk_inline()` | Inline preview: removed lines as dimmed virtual lines above the hunk + highlighted added lines, cleared on the next cursor move (no float) |
 | `restore_hunk()` | Replace hunk lines with `@-` content via buffer API |
 | `select_hunk(bufnr?)` | Set visual selection to hunk lines |
 | `diffthis(rev?)` | Open vimdiff vs `rev` (default `"@-"`) |
@@ -223,6 +243,24 @@ require("jj-signs").setup({
 | `setloclist(target?, opts?)` | Send hunks to the current window's location list |
 | `summary()` | Return `{ added, changed, deleted, conflicts }` |
 
+### `nav_hunk` options
+
+`nav_hunk(direction, opts?)` accepts a per-call `opts` table; each key falls back
+to the matching `nav` config default (see [Configuration](#configuration)).
+
+| Key | Default | Effect |
+| --- | ------- | ------ |
+| `wrap` | `true` | Wrap around the ends of the buffer when there is no hunk in `direction`. |
+| `count` | `1` | Skip `count` hunks instead of one (no-op for `"first"`/`"last"`). |
+| `foldopen` | `true` | Run `normal! zv` at the destination to open any closed fold. |
+| `navigation_message` | `true` | Echo `"Hunk N of M"` after the jump. Set `false` to suppress. |
+| `preview` | `false` | Auto-open a preview after the jump: `true` = float (`preview_hunk`), `"inline"` = virtual lines (`preview_hunk_inline`). |
+
+```lua
+local jj = require("jj-signs")
+jj.nav_hunk("next", { count = 2, preview = "inline", wrap = false })
+```
+
 ## Commands
 
 `:JJSigns <action> [args...]` runs any of the public actions from the command
@@ -235,6 +273,7 @@ tab-completes:
 :JJSigns nav_hunk prev
 :JJSigns diffthis @--     " == require("jj-signs").diffthis("@--")
 :JJSigns preview_hunk
+:JJSigns preview_hunk_inline
 :JJSigns restore_hunk
 :JJSigns blame_line full   " popup with diff; omit 'full' for message-only
 :JJSigns blame             " full-file blame split
