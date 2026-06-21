@@ -12,6 +12,10 @@ local status   = require("jj-signs.status")
 
 local M = {}
 
+--- Global on/off flag. When false, auto-attach (via schedule_refresh) is
+--- skipped. Toggled by M.enable / M.disable; read by autocmds.schedule_refresh.
+M._enabled = true
+
 --- @param opts JJSigns.Config?
 function M.setup(opts)
   config.setup(opts)
@@ -306,6 +310,63 @@ function M.refresh(bufnr)
       status.update(bufnr, merged, new_change_id)
     end)
   end)
+end
+
+--- Read-only accessor: a copy of the cached hunks for a buffer. Returns an empty
+--- table when the buffer is not attached, so callers never see nil.
+--- @param bufnr integer?
+--- @return JJSigns.Hunk[]
+function M.get_hunks(bufnr)
+  bufnr = bufnr or api.nvim_get_current_buf()
+  local entry = cache.get(bufnr)
+  if not entry or not entry.hunks then return {} end
+  return vim.deepcopy(entry.hunks)
+end
+
+--- Whether jj-signs is attached to a buffer.
+--- @param bufnr integer?
+--- @return boolean
+function M.is_attached(bufnr)
+  bufnr = bufnr or api.nvim_get_current_buf()
+  return cache.has(bufnr)
+end
+
+--- Detach from every attached buffer.
+function M.detach_all()
+  -- Snapshot keys first: M.detach mutates the cache table as we go.
+  local bufs = {}
+  for bufnr in pairs(cache.all()) do
+    bufs[#bufs + 1] = bufnr
+  end
+  for _, bufnr in ipairs(bufs) do
+    M.detach(bufnr)
+  end
+end
+
+--- Schedule a refresh for every attached, visible buffer.
+function M.refresh_all()
+  for bufnr in pairs(cache.all()) do
+    if api.nvim_buf_is_valid(bufnr) and #vim.fn.win_findbuf(bufnr) > 0 then
+      autocmds.schedule_refresh(bufnr)
+    end
+  end
+end
+
+--- Globally disable jj-signs: detach all buffers and skip auto-attach until
+--- M.enable is called.
+function M.disable()
+  M._enabled = false
+  M.detach_all()
+end
+
+--- Globally (re-)enable jj-signs and attach to all currently loaded buffers.
+function M.enable()
+  M._enabled = true
+  for _, bufnr in ipairs(api.nvim_list_bufs()) do
+    if api.nvim_buf_is_loaded(bufnr) then
+      M.attach(bufnr)
+    end
+  end
 end
 
 --- @param direction "next" | "prev" | "first" | "last"

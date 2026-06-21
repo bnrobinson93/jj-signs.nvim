@@ -15,6 +15,9 @@ local throttled_refresh = async.throttle_async(
 --- Schedule a refresh for bufnr.
 --- @param bufnr integer
 function M.schedule_refresh(bufnr)
+  -- Global off-switch: M.disable sets this false to suppress auto-attach/refresh.
+  if require("jj-signs")._enabled == false then return end
+
   if not api.nvim_buf_is_valid(bufnr) then return end
 
   -- Defer when buffer is not visible in any window; WinEnter/BufWinEnter

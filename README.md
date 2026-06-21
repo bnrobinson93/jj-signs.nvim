@@ -175,6 +175,12 @@ require("jj-signs").setup({
 | `attach(bufnr?)` | Attach to buffer (called automatically) |
 | `detach(bufnr?)` | Detach and clear signs |
 | `refresh(bufnr?)` | Force re-check change_id + mtime and redraw |
+| `refresh_all()` | Schedule a refresh for every attached, visible buffer |
+| `detach_all()` | Detach from every attached buffer |
+| `enable()` | Globally enable and re-attach all loaded buffers |
+| `disable()` | Globally disable: detach all and skip auto-attach |
+| `is_attached(bufnr?)` | Whether jj-signs is attached to the buffer |
+| `get_hunks(bufnr?)` | Copy of the cached hunks (read-only accessor) |
 | `nav_hunk(direction)` | Navigate: `"next"` `"prev"` `"first"` `"last"` |
 | `preview_hunk()` | Float showing removed/added lines |
 | `restore_hunk()` | Replace hunk lines with `@-` content via buffer API |
@@ -217,9 +223,10 @@ optional explicit value, e.g. `require("jj-signs").toggle_signs(false)`.
 
 Positional args after the action are forwarded to the function (e.g.
 `nav_hunk next`, `diffthis @--`). Available actions: `nav_hunk`, `preview_hunk`,
-`restore_hunk`, `diffthis`, `diffthis_rev`, `select_hunk`, `refresh`, `attach`,
-`detach`, `toggle_current_line_blame`, `toggle_signs`, `toggle_numhl`,
-`toggle_linehl`, `toggle_word_diff`, `toggle_deleted`.
+`restore_hunk`, `diffthis`, `diffthis_rev`, `select_hunk`, `refresh`,
+`refresh_all`, `attach`, `detach`, `detach_all`, `enable`, `disable`,
+`get_hunks`, `is_attached`, `toggle_current_line_blame`, `toggle_signs`,
+`toggle_numhl`, `toggle_linehl`, `toggle_word_diff`, `toggle_deleted`.
 
 The command is registered before `setup()` runs; invoking it lazily initializes
 jj-signs with defaults if you have not called `setup()` yet.
