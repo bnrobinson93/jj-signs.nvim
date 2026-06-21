@@ -220,6 +220,67 @@ describe("diff.merge_hunks", function()
   end)
 end)
 
+describe("diff.build_diff_opts", function()
+  local config = require("jj-signs.config")
+
+  after_each(function()
+    config.setup({})
+  end)
+
+  it("forwards algorithm into the vim.diff opts", function()
+    config.setup({ diff_opts = { algorithm = "patience" } })
+    local o = diff.build_diff_opts({ result_type = "unified", ctxlen = 3 })
+    eq("patience", o.algorithm)
+    eq("unified", o.result_type)
+    eq(3, o.ctxlen)
+  end)
+
+  it("forwards whitespace flags as vim.diff's native opt keys", function()
+    config.setup({ diff_opts = { ignore_whitespace = true, ignore_whitespace_change = true } })
+    local o = diff.build_diff_opts()
+    eq(true, o.ignore_whitespace)
+    eq(true, o.ignore_whitespace_change)
+  end)
+
+  it("defaults to myers with whitespace flags and linematch unset", function()
+    config.setup({})
+    local o = diff.build_diff_opts()
+    eq("myers", o.algorithm)
+    eq(false, o.indent_heuristic)
+    eq(nil, o.ignore_whitespace)
+    eq(nil, o.ignore_whitespace_change)
+    eq(nil, o.linematch)
+  end)
+
+  it("ignore_whitespace collapses a whitespace-only hunk", function()
+    local base = "foo\nbar\n"
+    local buf  = "foo  \n  bar\n"
+
+    config.setup({})
+    h.neq("", vim.diff(base, buf, diff.build_diff_opts({ result_type = "unified", ctxlen = 3 })))
+
+    config.setup({ diff_opts = { ignore_whitespace = true } })
+    eq("", vim.diff(base, buf, diff.build_diff_opts({ result_type = "unified", ctxlen = 3 })))
+  end)
+
+  it("threads opts through word_diff's vim.diff call", function()
+    config.setup({ diff_opts = { algorithm = "histogram" } })
+    local orig = vim.diff
+    local captured
+    vim.diff = function(a, b, o)
+      captured = o
+      return orig(a, b, o)
+    end
+    local ok, err = pcall(function()
+      require("jj-signs.word_diff")._run_word_diff({ "abc" }, { "abd" })
+    end)
+    vim.diff = orig
+    assert(ok, err)
+    eq("histogram", captured.algorithm)
+    eq("indices", captured.result_type)
+  end)
+end)
+
 describe("diff.get_parent_ids", function()
   local orig_system
   local orig_schedule

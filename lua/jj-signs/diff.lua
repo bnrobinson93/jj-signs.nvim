@@ -225,6 +225,29 @@ function M.parse_hunks(diff_output)
 	return hunks
 end
 
+--- Build a vim.diff() opts table from config.diff_opts merged with `extra`.
+--- `extra` supplies call-specific fields (result_type, ctxlen); it wins on
+--- conflict. vim.diff exposes whitespace handling as native boolean opts
+--- (:h vim.diff) — ignore_whitespace = iwhiteall, ignore_whitespace_change =
+--- iwhite at the xdiff level — so the config keys pass straight through.
+--- linematch is only set when truthy so vim.diff keeps its default off-state.
+--- @param extra table?
+--- @return table
+function M.build_diff_opts(extra)
+	local d = config.config.diff_opts or {}
+	local o = {
+		algorithm        = d.algorithm or "myers",
+		indent_heuristic = d.indent_heuristic or false,
+	}
+	if d.linematch then o.linematch = d.linematch end
+	if d.ignore_whitespace then o.ignore_whitespace = true end
+	if d.ignore_whitespace_change then o.ignore_whitespace_change = true end
+	if extra then
+		for k, v in pairs(extra) do o[k] = v end
+	end
+	return o
+end
+
 --- Run vim.diff() off the main thread via the libuv thread pool.
 ---
 --- uv.new_work(work_fn, after_fn) runs work_fn in a thread-pool worker with a
@@ -243,14 +266,26 @@ end
 function M.diff_async(base_text, buf_text, opts, cb)
 	local uv = vim.uv or vim.loop
 
+	-- Merge config diff_opts on the main thread, then serialize into primitives
+	-- for the worker (only primitives cross the new_work boundary — no tables).
+	local merged = M.build_diff_opts({ result_type = "unified", ctxlen = tonumber(opts.ctxlen) or 3 })
+
 	local work = uv.new_work(
-		function(a, b, opts_str)
+		function(a, b, ctxlen, algorithm, indent_heuristic, linematch, iwc, iw)
 			-- Worker thread: no access to upvalues/closures/vim state.
 			if type(vim) ~= "table" or type(vim.diff) ~= "function" then
 				return "__no_diff__", ""
 			end
-			-- Only ctxlen crosses the thread boundary (primitives only).
-			local o = { result_type = "unified", ctxlen = tonumber(opts_str) or 3 }
+			-- Rebuild the opts table from the primitives that crossed the boundary.
+			local o = {
+				result_type      = "unified",
+				ctxlen           = tonumber(ctxlen) or 3,
+				algorithm        = algorithm,
+				indent_heuristic = indent_heuristic,
+			}
+			if linematch and linematch > 0 then o.linematch = linematch end
+			if iwc then o.ignore_whitespace_change = true end
+			if iw then o.ignore_whitespace = true end
 			local ok, result = pcall(vim.diff, a, b, o)
 			if not ok then
 				return "__no_diff__", ""
@@ -260,10 +295,9 @@ function M.diff_async(base_text, buf_text, opts, cb)
 		function(status, result)
 			if status ~= "ok" then
 				-- Worker lacks a usable vim.diff (older Neovim): run it on the
-				-- main thread instead.
+				-- main thread instead, with the same merged opts.
 				vim.schedule(function()
-					local o = { result_type = "unified", ctxlen = tonumber(opts.ctxlen) or 3 }
-					local ok, r = pcall(vim.diff, base_text, buf_text, o)
+					local ok, r = pcall(vim.diff, base_text, buf_text, merged)
 					cb((ok and r and r ~= "") and r or nil)
 				end)
 				return
@@ -273,7 +307,16 @@ function M.diff_async(base_text, buf_text, opts, cb)
 			end)
 		end
 	)
-	work:queue(base_text, buf_text, tostring(opts.ctxlen or 3))
+	work:queue(
+		base_text,
+		buf_text,
+		merged.ctxlen,
+		merged.algorithm,
+		merged.indent_heuristic and true or false,
+		merged.linematch or 0,
+		merged.ignore_whitespace_change and true or false,
+		merged.ignore_whitespace and true or false
+	)
 end
 
 --- Scan buffer lines for JJ conflict markers and return conflict hunks.

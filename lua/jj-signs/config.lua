@@ -14,6 +14,14 @@ local M = {}
 --- @field on_attach?      fun(bufnr: integer): boolean?
 --- @field preview_config  JJSigns.PreviewConfig
 --- @field nav             JJSigns.NavConfig
+--- @field diff_opts        JJSigns.DiffOpts
+
+--- @class JJSigns.DiffOpts
+--- @field algorithm                "myers"|"minimal"|"patience"|"histogram"  xdiff algorithm
+--- @field indent_heuristic         boolean      shift hunk boundaries for nicer alignment
+--- @field linematch                integer?     second-stage line matching (nil = off)
+--- @field ignore_whitespace        boolean      ignore all whitespace (vim.diff ignore_whitespace)
+--- @field ignore_whitespace_change boolean      ignore whitespace amount changes (vim.diff ignore_whitespace_change)
 
 --- @class JJSigns.PreviewConfig
 --- @field border   string|string[]  float border style (any nvim_open_win border value)
@@ -83,6 +91,15 @@ M.defaults = {
     navigation_message = true,  -- echo "Hunk N of M" after a jump
     foldopen           = true,  -- open folds at the destination
     preview            = false, -- true = float, "inline" = virtual lines
+  },
+  -- vim.diff()/xdiff tuning, mirroring gitsigns' diff_opts. Defaults reproduce
+  -- vim.diff's built-in behavior (myers, no whitespace folding).
+  diff_opts = {
+    algorithm                = "myers", -- "myers" | "minimal" | "patience" | "histogram"
+    indent_heuristic         = false,   -- shift hunk boundaries for nicer alignment
+    linematch                = nil,      -- integer second-stage line matching, nil = off
+    ignore_whitespace        = false,   -- ignore all whitespace (vim.diff ignore_whitespace)
+    ignore_whitespace_change = false,   -- ignore whitespace amount changes (vim.diff ignore_whitespace_change)
   },
   -- Callback invoked after attaching to a buffer. Set up buffer-local keymaps here.
   -- Return false to cancel the attach. When nil, built-in default keymaps are used.

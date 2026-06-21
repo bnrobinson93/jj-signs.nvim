@@ -73,6 +73,16 @@ require("jj-signs").setup({
     preview            = false,  -- true = float, "inline" = virtual lines
   },
 
+  -- vim.diff()/xdiff tuning, mirroring gitsigns' diff_opts. Affects how hunks
+  -- are computed and aligned. Defaults reproduce vim.diff's built-in behavior.
+  diff_opts = {
+    algorithm                = "myers", -- "myers" | "minimal" | "patience" | "histogram"
+    indent_heuristic         = false,   -- shift hunk boundaries to align with indentation
+    linematch                = nil,      -- integer: second-stage line matching within hunks (nil = off)
+    ignore_whitespace        = false,   -- ignore all whitespace
+    ignore_whitespace_change = false,   -- ignore changes in whitespace amount
+  },
+
   jj_cmd          = "jj",
   -- Optional: passed as `jj --repository <path>` to every jj call.
   -- Leave nil — cwd-based workspace detection handles all standard JJ setups.

@@ -19,7 +19,7 @@ local function run_word_diff(removed_lines, added_lines)
   for i = 1, line_count do
     local rline = removed_lines[i]
     local aline = added_lines[i]
-    local rdiffs = vim.diff(to_lines(rline), to_lines(aline), { result_type = "indices" })
+    local rdiffs = vim.diff(to_lines(rline), to_lines(aline), require("jj-signs.diff").build_diff_opts({ result_type = "indices" }))
     if rdiffs then
       for _, r in ipairs(rdiffs) do
         local rs, rc, as, ac = r[1], r[2], r[3], r[4]
