@@ -51,7 +51,7 @@ function M.start(root, cb)
     return
   end
 
-  local target = root .. "/.jj/repo/op_heads/"
+  local target = root .. "/.jj/repo/op_heads/heads/"
   local entry  = { handle = nil, refs = 1, cb = cb, timer = nil }
   watchers[root] = entry
 
