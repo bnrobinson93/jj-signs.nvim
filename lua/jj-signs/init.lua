@@ -366,4 +366,70 @@ function M.toggle_current_line_blame()
   end
 end
 
+--- Re-place signs for every attached buffer from its cached hunks. signs.place
+--- re-reads the live config flags (signcolumn/numhl/linehl/word_diff/show_deleted)
+--- on each call, so a single reapply propagates any flag flip to all buffers.
+function M._reapply_all()
+  for bufnr, entry in pairs(cache.all()) do
+    if api.nvim_buf_is_valid(bufnr) and entry.hunks then
+      signs.place(bufnr, entry.hunks)
+    end
+  end
+end
+
+--- Flip a boolean config flag, or set it to an explicit value when given.
+--- @param flag string  key in config.config
+--- @param value boolean?  explicit value; nil toggles the current value
+--- @return boolean  the new value
+local function set_flag(flag, value)
+  if value == nil then value = not config.config[flag] end
+  config.config[flag] = value
+  return value
+end
+
+--- Toggle the sign column. Mirrors gitsigns' toggle_signs.
+--- @param value boolean?  explicit value; nil toggles
+--- @return boolean  the new signcolumn state
+function M.toggle_signs(value)
+  local v = set_flag("signcolumn", value)
+  M._reapply_all()
+  return v
+end
+
+--- Toggle number-column highlighting. Forces the non-provider extmark path.
+--- @param value boolean?  explicit value; nil toggles
+--- @return boolean  the new numhl state
+function M.toggle_numhl(value)
+  local v = set_flag("numhl", value)
+  M._reapply_all()
+  return v
+end
+
+--- Toggle line highlighting. Forces the non-provider extmark path.
+--- @param value boolean?  explicit value; nil toggles
+--- @return boolean  the new linehl state
+function M.toggle_linehl(value)
+  local v = set_flag("linehl", value)
+  M._reapply_all()
+  return v
+end
+
+--- Toggle inline word-diff highlighting. signs.place gates place_word_diff.
+--- @param value boolean?  explicit value; nil toggles
+--- @return boolean  the new word_diff state
+function M.toggle_word_diff(value)
+  local v = set_flag("word_diff", value)
+  M._reapply_all()
+  return v
+end
+
+--- Toggle virtual-line display of deleted lines. signs.place gates the rendering.
+--- @param value boolean?  explicit value; nil toggles
+--- @return boolean  the new show_deleted state
+function M.toggle_deleted(value)
+  local v = set_flag("show_deleted", value)
+  M._reapply_all()
+  return v
+end
+
 return M

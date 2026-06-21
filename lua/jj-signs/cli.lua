@@ -22,6 +22,11 @@ local subcommands = {
   "attach",
   "detach",
   "toggle_current_line_blame",
+  "toggle_signs",
+  "toggle_numhl",
+  "toggle_linehl",
+  "toggle_word_diff",
+  "toggle_deleted",
 }
 
 --- Resolve a subcommand name to its module function.

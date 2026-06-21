@@ -182,6 +182,11 @@ require("jj-signs").setup({
 | `diffthis(rev?)` | Open vimdiff vs `rev` (default `"@-"`) |
 | `diffthis_rev()` | Prompt for revision, then open vimdiff |
 | `toggle_current_line_blame()` | Toggle inline blame |
+| `toggle_signs(value?)` | Toggle the sign column; returns new state |
+| `toggle_numhl(value?)` | Toggle number-column highlighting; returns new state |
+| `toggle_linehl(value?)` | Toggle line highlighting; returns new state |
+| `toggle_word_diff(value?)` | Toggle inline word-diff; returns new state |
+| `toggle_deleted(value?)` | Toggle deleted-line virtual lines; returns new state |
 | `summary()` | Return `{ added, changed, deleted, conflicts }` |
 
 ## Commands
@@ -199,12 +204,22 @@ tab-completes:
 :JJSigns restore_hunk
 :JJSigns refresh
 :JJSigns toggle_current_line_blame
+:JJSigns toggle_signs
+:JJSigns toggle_numhl
+:JJSigns toggle_linehl
+:JJSigns toggle_word_diff
+:JJSigns toggle_deleted
 ```
+
+Each `toggle_*` flips the matching config flag and re-renders all attached
+buffers. They return the new boolean (gitsigns convention) and accept an
+optional explicit value, e.g. `require("jj-signs").toggle_signs(false)`.
 
 Positional args after the action are forwarded to the function (e.g.
 `nav_hunk next`, `diffthis @--`). Available actions: `nav_hunk`, `preview_hunk`,
 `restore_hunk`, `diffthis`, `diffthis_rev`, `select_hunk`, `refresh`, `attach`,
-`detach`, `toggle_current_line_blame`.
+`detach`, `toggle_current_line_blame`, `toggle_signs`, `toggle_numhl`,
+`toggle_linehl`, `toggle_word_diff`, `toggle_deleted`.
 
 The command is registered before `setup()` runs; invoking it lazily initializes
 jj-signs with defaults if you have not called `setup()` yet.
