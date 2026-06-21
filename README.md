@@ -393,6 +393,25 @@ require("jj-signs").setup({
 - Default base is `@` vs its parent (`@-`); use `change_base <rev>` to compare against an arbitrary revision per buffer
 - No hunk-level CLI operations — restore uses the buffer API, diff uses a temp file
 
+## Troubleshooting / Docs
+
+Run a health check to diagnose a missing/old `jj`, an unsupported Neovim
+version, an invalid `jj_repo`, or to see how many buffers are attached:
+
+```vim
+:checkhealth jj-signs
+```
+
+Full documentation ships as vimdoc:
+
+```vim
+:help jj-signs
+```
+
+Plugin managers generate help tags automatically. If `:help jj-signs` reports
+no tags, generate them once with `:helptags doc/` (or `:helptags ALL`) from the
+plugin directory.
+
 ## Credits
 
 Sign rendering, hunk calculation, and navigation logic are adapted from

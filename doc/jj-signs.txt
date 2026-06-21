@@ -1,0 +1,296 @@
+*jj-signs.txt*    Inline change annotations for Neovim in Jujutsu (jj) repos
+
+Author:   jj-signs.nvim contributors
+License:  MIT
+
+==============================================================================
+CONTENTS                                                       *jj-signs-contents*
+
+  1. Introduction ............................. |jj-signs-introduction|
+  2. Requirements ............................. |jj-signs-requirements|
+  3. Setup & configuration .................... |jj-signs-setup|
+  4. Commands ................................. |jj-signs-commands|
+  5. API ...................................... |jj-signs-api|
+  6. Keymaps .................................. |jj-signs-keymaps|
+  7. Statusline ............................... |jj-signs-statusline|
+  8. Highlights ............................... |jj-signs-highlights|
+  9. Health ................................... |jj-signs-health|
+
+==============================================================================
+1. INTRODUCTION                                            *jj-signs-introduction*
+                                                                       *jj-signs*
+
+jj-signs.nvim is the gitsigns.nvim equivalent for Jujutsu (jj) repositories. It
+shows which lines in the current buffer are part of the current jj change (`@`)
+compared to its parent (`@-`), in the sign column:
+
+    ▎  added line          green sign
+    ▎  modified line        yellow sign
+    ▁  deleted below        red underscore at deletion point
+    ▔  deleted at top       red overscore (topdelete)
+    ▎  modified + shrunk     yellow/red (changedelete)
+    ╪  conflict line        red, distinct from normal diffs
+
+Signs refresh automatically on `BufEnter`, `BufWritePost`, and `FocusGained`,
+and live-update for unsaved buffers. No manual command needed.
+
+==============================================================================
+2. REQUIREMENTS                                            *jj-signs-requirements*
+
+- Neovim >= 0.10
+- jj installed and in $PATH (https://github.com/jj-vcs/jj)
+
+Run |jj-signs-health| (`:checkhealth jj-signs`) to verify your environment.
+
+==============================================================================
+3. SETUP & CONFIGURATION                                          *jj-signs-setup*
+                                                            *jj-signs.setup()*
+
+Call `require("jj-signs").setup(opts)` once. With lazy.nvim, pass `opts = {}`.
+All options shown with defaults: >lua
+
+    require("jj-signs").setup({
+      signs = {
+        add          = { text = "▎", hl = "JJSignsAdd" },
+        change       = { text = "▎", hl = "JJSignsChange" },
+        delete       = { text = "▁", hl = "JJSignsDelete" },
+        topdelete    = { text = "▔", hl = "JJSignsTopDelete" },
+        changedelete = { text = "▎", hl = "JJSignsChangedelete" },
+        conflict     = { text = "╪", hl = "JJSignsConflict" },
+      },
+      signcolumn      = true,
+      numhl           = false,  -- highlight the number column
+      linehl          = false,  -- highlight the full line
+      word_diff       = false,  -- intra-line word highlights on changed lines
+      show_deleted    = false,  -- render deleted lines as dimmed virtual text
+      update_debounce = 100,
+      max_file_length = 40000,
+      sign_priority   = 6,
+      use_decoration_provider = true,  -- render signs lazily for visible lines
+
+      preview_config = {
+        border   = "rounded",
+        style    = "minimal",
+        relative = "cursor",
+        row      = 1,
+        col      = 0,
+      },
+      nav = {
+        wrap               = true,
+        navigation_message = true,
+        foldopen           = true,
+        preview            = false,  -- true = float, "inline" = virtual lines
+      },
+      diff_opts = {
+        algorithm                = "myers",
+        indent_heuristic         = false,
+        linematch                = nil,
+        ignore_whitespace        = false,
+        ignore_whitespace_change = false,
+      },
+
+      jj_cmd   = "jj",
+      jj_repo  = nil,   -- passed as `jj --repository <path>`; nil = cwd detection
+      on_attach = nil,  -- function(bufnr) to set buffer-local keymaps
+
+      current_line_blame = false,
+      current_line_blame_opts = {
+        virt_text     = true,
+        virt_text_pos = "eol",
+        delay         = 1000,
+        format        = "‹ %s • %a • %r",
+      },
+    })
+<
+Key options:                                                     *jj-signs-options*
+
+    jj_cmd      Name or path of the jj executable. Default "jj".
+    jj_repo     Optional workspace root, passed as `jj --repository <path>`.
+                Leave nil — cwd-based workspace detection handles standard
+                setups, including multiple `jj workspace add` workspaces.
+    use_decoration_provider
+                When true (default), signs are rendered lazily for visible
+                lines only. Set false to place all signs eagerly via extmarks
+                (needed if numhl/linehl behave oddly with some plugins).
+    on_attach   function(bufnr) called after attaching. Set buffer-local
+                keymaps here. Return false to cancel the attach. When nil, the
+                built-in default keymaps are used (see |jj-signs-keymaps|).
+    status_formatter
+                function(dict) -> string building `b:jjsigns_status`. See
+                |jj-signs-statusline|.
+
+==============================================================================
+4. COMMANDS                                                     *jj-signs-commands*
+                                                                     *:JJSigns*
+
+`:JJSigns {action} [args...]` runs any public action from the command line —
+the command-line equivalent of the |jj-signs-api| table. The action name
+tab-completes. >vim
+
+    :JJSigns <Tab>             " list actions
+    :JJSigns nav_hunk next     " == require("jj-signs").nav_hunk("next")
+    :JJSigns diffthis @--      " diff vs the grandparent revision
+    :JJSigns change_base main  " compare this buffer against 'main' not @-
+    :JJSigns reset_base        " back to the default @- base
+    :JJSigns blame_line full   " popup with diff; omit 'full' for message only
+    :JJSigns setqflist attached " hunks across all buffers -> quickfix
+<
+Available actions: nav_hunk, preview_hunk, preview_hunk_inline, restore_hunk,
+diffthis, diffthis_rev, change_base, reset_base, blame_line, blame,
+select_hunk, refresh, refresh_all, attach, detach, detach_all, enable, disable,
+get_hunks, is_attached, toggle_current_line_blame, toggle_signs, toggle_numhl,
+toggle_linehl, toggle_word_diff, toggle_deleted, setqflist, setloclist.
+
+Positional args after the action are forwarded to the function. The command is
+registered before setup() runs; invoking it lazily initializes jj-signs with
+defaults if you have not called setup() yet.
+
+==============================================================================
+5. API                                                               *jj-signs-api*
+
+All functions are fields of `require("jj-signs")`.
+
+    setup(opts)               Initialize with config. See |jj-signs-setup|.
+    attach(bufnr?)            Attach to a buffer (called automatically).
+    detach(bufnr?)            Detach and clear signs.
+    refresh(bufnr?)           Force re-check change_id + mtime and redraw.
+    refresh_all()             Schedule a refresh for every visible attached buf.
+    detach_all()              Detach from every attached buffer.
+    enable()                  Globally enable and re-attach loaded buffers.
+    disable()                 Globally disable: detach all, skip auto-attach.
+    is_attached(bufnr?)       Whether jj-signs is attached to the buffer.
+    get_hunks(bufnr?)         Copy of cached hunks (read-only accessor).
+    nav_hunk(direction, opts?)
+                              Navigate: "next" "prev" "first" "last".
+                              See |jj-signs-nav-opts|.
+    preview_hunk()            Float showing removed/added lines.
+    preview_hunk_inline()     Inline preview via virtual lines (no float).
+    restore_hunk()            Replace hunk lines with @- content (buffer API).
+    select_hunk(bufnr?)       Set visual selection to hunk lines.
+    diffthis(rev?)            Open vimdiff vs rev (default "@-").
+    diffthis_rev()            Prompt for a revision, then open vimdiff.
+    change_base(rev, bufnr?)  Compare buffer against rev instead of @-. Shows
+                              "what changed since rev" (e.g. a branch point).
+                              Per-buffer; invalidates cached base and refreshes.
+    reset_base(bufnr?)        Restore the default @- comparison base.
+    blame_line(opts?)         Popup the cursor line's change description.
+                              opts.full adds the diff. Sourced from `jj show`.
+    blame()                   Full-file blame in a scroll-bound side split.
+    toggle_current_line_blame()  Toggle inline EOL blame.
+    toggle_signs(value?)      Toggle the sign column; returns new state.
+    toggle_numhl(value?)      Toggle number-column highlight; returns new state.
+    toggle_linehl(value?)     Toggle line highlight; returns new state.
+    toggle_word_diff(value?)  Toggle inline word-diff; returns new state.
+    toggle_deleted(value?)    Toggle deleted-line virtual lines; returns state.
+    setqflist(target?, opts?) Send hunks to the quickfix list.
+    setloclist(target?, opts?)  Send hunks to the window's location list.
+    summary()                 Return { added, changed, deleted, conflicts }.
+
+nav_hunk options                                              *jj-signs-nav-opts*
+
+`nav_hunk(direction, opts?)` accepts a per-call opts table; each key falls back
+to the matching `nav` config default.
+
+    wrap                bool   Wrap around buffer ends. Default true.
+    count               int    Skip `count` hunks. Default 1.
+    foldopen            bool   Open folds at the destination. Default true.
+    navigation_message  bool   Echo "Hunk N of M". Default true.
+    preview             bool|"inline"  Auto-open a preview after the jump.
+                               Default false.
+
+Quickfix / loclist target                                  *jj-signs-qf-target*
+
+`setqflist(target, opts)` / `setloclist(target, opts)` select contributing bufs:
+
+    "attached" / nil    every attached buffer
+    0                   the current buffer
+    a bufnr             that specific buffer
+
+`opts.open` opens the list (`:copen`/`:lopen`). For setqflist, `opts.use_loc`
+routes to the location list. Items are built from cached hunks — no jj
+subprocess runs.
+
+==============================================================================
+6. KEYMAPS                                                       *jj-signs-keymaps*
+
+Default keymaps are buffer-local and set during attach (when `on_attach` is
+nil). They match LazyVim's gitsigns layout.
+
+    ]h            n       Jump to next hunk
+    [h            n       Jump to previous hunk
+    ]H            n       Jump to last hunk
+    [H            n       Jump to first hunk
+    <leader>ghp   n       Preview hunk in floating window
+    <leader>ghP   n       Preview hunk inline (virtual lines)
+    <leader>ghr   n       Restore hunk to @- state
+    <leader>ghd   n       Diff current file vs @- in vimdiff
+    <leader>ghD   n       Diff vs a prompted revision
+    <leader>ghb   n       Blame line: change description popup
+    <leader>ghB   n       Blame full file in a side split
+    ih            x, o    Select hunk (inner hunk text object)
+    <leader>ghq   n       JJ hunks -> quickfix (all buffers)
+    <leader>ghl   n       JJ hunks -> loclist (current buffer)
+
+To replace the defaults, set `on_attach` in setup() and define your own maps
+on `bufnr` (see |jj-signs-options|).
+
+==============================================================================
+7. STATUSLINE                                                 *jj-signs-statusline*
+
+jj-signs maintains buffer-local variables, refreshed on every sign redraw,
+mirroring gitsigns' `b:gitsigns_status*`:
+
+    b:jjsigns_status_dict   { added, changed, removed, conflicts, head }
+    b:jjsigns_status        Formatted string, e.g. "+3 ~1 -2"
+    b:jjsigns_head          Short change_id of @
+
+Read the variable rather than calling a function each redraw. Example lualine
+component: >lua
+
+    {
+      function() return vim.b.jjsigns_status or "" end,
+      cond = function()
+        local d = vim.b.jjsigns_status_dict
+        return d ~= nil and (d.added + d.changed + d.removed + d.conflicts) > 0
+      end,
+    }
+<
+The `b:jjsigns_status` string is built by the configurable `status_formatter`
+(default "+N ~N -N", omitting any zero count).
+
+==============================================================================
+8. HIGHLIGHTS                                                 *jj-signs-highlights*
+
+Default highlight groups link to standard diff groups so any colorscheme works.
+Override any group with `nvim_set_hl`.
+
+    JJSignsAdd              Added / DiffAdd       Added lines
+    JJSignsChange           Changed / DiffChange  Changed lines
+    JJSignsDelete           Removed / DiffDelete  Deleted lines
+    JJSignsTopDelete        Removed / DiffDelete  Deletion at file top
+    JJSignsChangedelete     Changed / DiffChange  Change that shrinks
+    JJSignsConflict         DiagnosticError       Conflict markers
+    JJSignsAddWord          Added / DiffAdd       Word diff inline (added)
+    JJSignsChangeWord       Changed / DiffChange  Word diff inline (changed)
+    JJSignsDeleteWord       Removed / DiffDelete  Word diff inline (deleted)
+    JJSignsDeleteVirtLn     DiffDelete            show_deleted virtual lines
+    JJSignsCurrentLineBlame NonText               Inline blame text
+    JJSigns*Nr              JJSigns*              Number column variants (numhl)
+    JJSigns*Ln              diff groups           Line highlight variants (linehl)
+
+Example: >lua
+    vim.api.nvim_set_hl(0, "JJSignsAdd", { fg = "#00ff00" })
+<
+==============================================================================
+9. HEALTH                                                         *jj-signs-health*
+
+Run `:checkhealth jj-signs` to diagnose your setup. It verifies:
+
+- Neovim >= 0.10
+- the jj executable (`jj_cmd`) is found in $PATH
+- jj version is at or above the known-good minimum (0.18.0)
+- `jj_repo`, when set, points at a valid jj workspace
+- whether `use_decoration_provider` is enabled
+- the number of attached buffers and active op-log watchers
+
+vim:tw=78:ts=8:ft=help:norl:
