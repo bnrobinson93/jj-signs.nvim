@@ -1,5 +1,4 @@
 local M = {}
-local uv = vim.uv or vim.loop
 local unpack = table.unpack or _G.unpack  -- LuaJIT exposes the global form
 
 --- Wrap an async-callback function so it can be called like a regular

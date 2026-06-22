@@ -50,8 +50,8 @@ end
 
 --- No-op: retained for callers (init.lua detach). Throttle replaces the
 --- per-buffer debounce timer, so there is nothing to cancel.
---- @param bufnr integer
-function M.cancel(bufnr) end
+--- @param _bufnr integer
+function M.cancel(_bufnr) end
 
 --- WinEnter/BufWinEnter callback: re-run a refresh that was deferred while the
 --- buffer had no window.
