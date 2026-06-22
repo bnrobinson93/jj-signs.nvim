@@ -193,11 +193,33 @@ local function place_deleted_lines(bufnr, hunks)
   end
 end
 
+--- Force a full invalidating redraw on every window showing this buffer so the
+--- decoration provider's on_line callback re-evaluates from the current
+--- entry.hunk_index immediately, rather than on the next natural redraw.
+--- @param bufnr integer
+local function redraw_buf(bufnr)
+  for _, win in ipairs(api.nvim_list_wins()) do
+    if api.nvim_win_is_valid(win) and api.nvim_win_get_buf(win) == bufnr then
+      pcall(api.nvim__redraw, { win = win, valid = false })
+    end
+  end
+end
+
 --- @param bufnr integer
 function M.clear(bufnr)
   api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
   api.nvim_buf_clear_namespace(bufnr, deleted_ns, 0, -1)
   require("jj-signs.word_diff").clear_word_diff(bufnr)
+
+  -- Reset the decoration provider's source of truth. on_line draws persistent
+  -- sign marks from entry.hunk_index; if we clear the namespace but leave a stale
+  -- hunk_index, the next redraw repaints the very signs we just cleared. Drop the
+  -- index and request a redraw so the cleared state actually renders.
+  local entry = require("jj-signs.cache").get(bufnr)
+  if entry then
+    entry.hunk_index = nil
+  end
+  redraw_buf(bufnr)
 end
 
 --- @param bufnr integer
@@ -278,17 +300,12 @@ function M.place(bufnr, hunks)
     require("jj-signs.word_diff").place_word_diff(bufnr, hunks, entry and entry.change_id)
   end
 
-  -- When using the decoration provider, on_line places ephemeral extmarks per
-  -- render pass rather than persisting them in the namespace. Nothing marks the
-  -- buffer dirty, so signs only appear on the next natural redraw (cursor move).
-  -- Force a full invalidating redraw on every window showing this buffer so
-  -- on_line fires immediately after sign state changes.
+  -- When using the decoration provider, on_line draws signs per render pass
+  -- rather than via M.place directly. Nothing marks the buffer dirty, so signs
+  -- only appear on the next natural redraw (cursor move). Force a full
+  -- invalidating redraw so on_line fires immediately after sign state changes.
   if use_provider then
-    for _, win in ipairs(api.nvim_list_wins()) do
-      if api.nvim_win_is_valid(win) and api.nvim_win_get_buf(win) == bufnr then
-        pcall(api.nvim__redraw, { win = win, valid = false })
-      end
-    end
+    redraw_buf(bufnr)
   end
 end
 

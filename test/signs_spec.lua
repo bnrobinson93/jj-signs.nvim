@@ -1,7 +1,10 @@
 require("jj-signs.config").setup({})
-local signs = require("jj-signs.signs")
-local h     = require("test.helpers")
-local eq    = h.eq
+local api    = vim.api
+local config = require("jj-signs.config")
+local cache  = require("jj-signs.cache")
+local signs  = require("jj-signs.signs")
+local h      = require("test.helpers")
+local eq     = h.eq
 
 local build = signs._build_hunk_index
 local find  = signs._find_sign_at
@@ -157,5 +160,65 @@ describe("signs.find_sign_at", function()
     local e = find(15, idx)
     assert.is_not_nil(e)
     eq("delete", e.sign_type)
+  end)
+end)
+
+-- Regression: a sign painted via the decoration provider must not linger after
+-- the hunk disappears. on_line draws persistent sign marks from entry.hunk_index,
+-- so M.clear() has to drop hunk_index too — otherwise the next redraw repaints
+-- the very signs that were just cleared. See M.clear in signs.lua.
+describe("signs.clear / place state reset", function()
+  local function mk_buf(nlines)
+    local buf = api.nvim_create_buf(false, true)
+    local lines = {}
+    for i = 1, (nlines or 5) do lines[i] = "line" .. i end
+    api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    cache.set(buf, { root = "/tmp", change_id = "x", mtime = 0, hunks = {}, dirty = false })
+    return buf
+  end
+
+  it("place() populates entry.hunk_index", function()
+    local buf = mk_buf()
+    signs.place(buf, { mk("add", 1, 2, 0) })
+    local entry = cache.get(buf)
+    assert.is_not_nil(entry.hunk_index)
+    eq(1, #entry.hunk_index)
+    api.nvim_buf_delete(buf, { force = true })
+  end)
+
+  it("clear() resets entry.hunk_index to nil", function()
+    local buf = mk_buf()
+    signs.place(buf, { mk("add", 1, 2, 0) })
+    assert.is_not_nil(cache.get(buf).hunk_index)
+    signs.clear(buf)
+    assert.is_nil(cache.get(buf).hunk_index)
+    api.nvim_buf_delete(buf, { force = true })
+  end)
+
+  it("place({}) after place(hunks) leaves no stale source state", function()
+    local buf = mk_buf()
+    signs.place(buf, { mk("add", 1, 2, 0) })
+    signs.place(buf, {})
+    -- empty hunk list -> empty index, nothing for on_line to draw
+    eq(0, #cache.get(buf).hunk_index)
+    api.nvim_buf_delete(buf, { force = true })
+  end)
+
+  -- Non-decoration-provider path must still place and clear real marks in ns.
+  it("non-provider: place sets marks, place({}) removes them", function()
+    local saved = config.config.use_decoration_provider
+    config.config.use_decoration_provider = false
+    local buf = mk_buf()
+
+    signs.place(buf, { mk("add", 1, 2, 0) })
+    local marks = api.nvim_buf_get_extmarks(buf, signs.ns, 0, -1, {})
+    assert.is_true(#marks > 0)
+
+    signs.place(buf, {})
+    marks = api.nvim_buf_get_extmarks(buf, signs.ns, 0, -1, {})
+    eq(0, #marks)
+
+    config.config.use_decoration_provider = saved
+    api.nvim_buf_delete(buf, { force = true })
   end)
 end)
