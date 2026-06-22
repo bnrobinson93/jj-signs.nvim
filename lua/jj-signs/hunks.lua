@@ -4,6 +4,7 @@
 local api = vim.api
 local config = require("jj-signs.config")
 local cache = require("jj-signs.cache")
+local float = require("jj-signs.float")
 
 local M = {}
 
@@ -177,36 +178,7 @@ function M.preview_hunk()
     lines = { "(no content)" }
   end
 
-  local float_buf = api.nvim_create_buf(false, true)
-  api.nvim_buf_set_lines(float_buf, 0, -1, false, lines)
-  api.nvim_buf_set_option(float_buf, "filetype", "diff")
-
-  local width = 0
-  for _, l in ipairs(lines) do
-    width = math.max(width, #l)
-  end
-  width = math.min(math.max(width + 2, 20), 80)
-
-  local pc = config.config.preview_config or {}
-  local win = api.nvim_open_win(float_buf, false, {
-    relative = pc.relative or "cursor",
-    row      = pc.row or 1,
-    col      = pc.col or 0,
-    width    = width,
-    height   = math.min(#lines, 20),
-    style    = pc.style or "minimal",
-    border   = pc.border or "rounded",
-  })
-
-  -- Close on any cursor move or buffer leave
-  api.nvim_create_autocmd({ "CursorMoved", "BufLeave", "WinLeave" }, {
-    once = true,
-    callback = function()
-      if api.nvim_win_is_valid(win) then
-        api.nvim_win_close(win, true)
-      end
-    end,
-  })
+  float.open(lines, { filetype = "diff" })
 end
 
 --- Inline preview of the hunk under cursor: render `removed.lines` as dimmed

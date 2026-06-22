@@ -1,5 +1,6 @@
 local api = vim.api
 local config = require("jj-signs.config")
+local float = require("jj-signs.float")
 
 local M = {}
 local blame_ns = api.nvim_create_namespace("jj-signs-blame")
@@ -153,43 +154,6 @@ local function format_blame_lines(entries)
   return lines
 end
 
---- Open a floating window (reuses hunks.preview_hunk's pattern) showing `lines`.
---- @param lines string[]
---- @param filetype string?
-local function open_float(lines, filetype)
-  local float_buf = api.nvim_create_buf(false, true)
-  api.nvim_buf_set_lines(float_buf, 0, -1, false, lines)
-  if filetype and filetype ~= "" then
-    api.nvim_buf_set_option(float_buf, "filetype", filetype)
-  end
-
-  local width = 0
-  for _, l in ipairs(lines) do
-    width = math.max(width, #l)
-  end
-  width = math.min(math.max(width + 2, 20), 80)
-
-  local win = api.nvim_open_win(float_buf, false, {
-    relative = "cursor",
-    row = 1,
-    col = 0,
-    width = width,
-    height = math.min(#lines, 20),
-    style = "minimal",
-    border = "rounded",
-  })
-
-  api.nvim_create_autocmd({ "CursorMoved", "BufLeave", "WinLeave" }, {
-    once = true,
-    callback = function()
-      if api.nvim_win_is_valid(win) then
-        api.nvim_win_close(win, true)
-      end
-    end,
-  })
-  return win, float_buf
-end
-
 --- Popup the full change description for the line under the cursor.
 --- Resolves the cursor change_id from cached annotate entries (M.fetch) then runs
 --- `jj show -r <change_id>` async. `opts.full` toggles message-only vs full diff.
@@ -229,7 +193,7 @@ function M.blame_line(opts)
       vim.schedule(function()
         local lines = build_show_lines(result.stdout, opts.full)
         if #lines == 0 then lines = { "(no description)" } end
-        open_float(lines, opts.full and "diff" or nil)
+        float.open(lines, { filetype = opts.full and "diff" or nil })
       end)
     end)
   end)

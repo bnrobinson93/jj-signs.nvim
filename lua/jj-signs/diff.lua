@@ -382,6 +382,21 @@ function M.find_conflicts(bufnr, first, last)
 	return conflict_hunks
 end
 
+--- Conflict scan with the cheap guard folded in: returns find_conflicts hunks
+--- when the region holds a conflict-start marker, else `{}` (skipping the fuller
+--- scan). `first`/`last` are 0-indexed (as passed to nvim_buf_get_lines); omit
+--- both to scan the whole buffer.
+--- @param bufnr integer
+--- @param first integer?  0-indexed start line (default 0)
+--- @param last integer?   0-indexed end line, exclusive (default -1 = end)
+--- @return JJSigns.Hunk[]
+function M.scan_conflicts(bufnr, first, last)
+	if not M.has_conflict_marker(bufnr, first, last) then
+		return {}
+	end
+	return M.find_conflicts(bufnr, first, last)
+end
+
 --- Merge freshly-computed partial hunks (from a narrowed diff over a dirty line
 --- range) into a cached full-buffer hunk list. Hunks that overlap the dirty
 --- range are stale and dropped; non-overlapping hunks are kept untouched. The

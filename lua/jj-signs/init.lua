@@ -234,9 +234,7 @@ function M.refresh(bufnr)
             end
           end
           local merged_hunks = diff_mod.replace_hunks_in_range(e2.hunks, partial, dr.first, dr.last)
-          local conflict_hunks = diff_mod.has_conflict_marker(bufnr, cfirst, clast + 1)
-            and diff_mod.find_conflicts(bufnr, cfirst, clast + 1)
-            or {}
+          local conflict_hunks = diff_mod.scan_conflicts(bufnr, cfirst, clast + 1)
           local merged = diff_mod.merge_hunks(merged_hunks, conflict_hunks)
           e2.hunks = merged
           e2.dirty = false
@@ -249,7 +247,7 @@ function M.refresh(bufnr)
         diff_mod.diff_async(base_text, buf_text, { ctxlen = 3 }, function(diff_out)
           if not api.nvim_buf_is_valid(bufnr) then return end
           local diff_hunks = (diff_out and diff_out ~= "") and diff_mod.parse_hunks(diff_out) or {}
-          local conflict_hunks = diff_mod.has_conflict_marker(bufnr) and diff_mod.find_conflicts(bufnr) or {}
+          local conflict_hunks = diff_mod.scan_conflicts(bufnr)
           local merged = diff_mod.merge_hunks(diff_hunks, conflict_hunks)
           local e2 = cache.get(bufnr)
           if not e2 then return end
@@ -331,7 +329,7 @@ function M.refresh(bufnr)
         return
       end
       if not api.nvim_buf_is_valid(bufnr) then return end
-      local conflict_hunks = diff_mod.has_conflict_marker(bufnr) and diff_mod.find_conflicts(bufnr) or {}
+      local conflict_hunks = diff_mod.scan_conflicts(bufnr)
       local merged = diff_mod.merge_hunks(diff_hunks, conflict_hunks)
       cache.set(bufnr, {
         root             = entry.root,
