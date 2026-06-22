@@ -11,6 +11,52 @@ end
 local watchers = {} --- @type table<string, { handle: any, refs: integer, cb: function, timer: any }>
 M._watchers = watchers
 
+-- Op generation + last-read change_id per root. This is the single source of
+-- truth for "has @ moved since we last read it". It lives here, not in init.lua,
+-- because init is loaded under two module names (`jj-signs` and `jj-signs.init`)
+-- and a local there splits into two tables — a watcher fire seen by one instance
+-- would be invisible to refresh() on the other. The watcher module has one
+-- canonical require name, so this state is genuinely shared.
+local op_gen = {} --- @type table<string, integer>
+local op_cid = {} --- @type table<string, { gen: integer, change_id: string }>
+M._op_gen = op_gen
+M._op_cid = op_cid
+
+--- Current op generation for a root (0 if never observed).
+--- @param root string
+--- @return integer
+function M.op_gen(root)
+  return op_gen[root] or 0
+end
+
+--- Cached @ change_id for a root, but only if it was read at the current
+--- generation. A later op bump invalidates it automatically (returns nil).
+--- @param root string
+--- @return string?
+function M.cached_change_id(root)
+  local c = op_cid[root]
+  if c and c.gen == (op_gen[root] or 0) then return c.change_id end
+  return nil
+end
+
+--- Record a change_id read at generation `gen`. If the watcher bumped the
+--- generation while the read was in flight, this stamp is already stale and
+--- cached_change_id will report a miss, so the next refresh re-reads.
+--- @param root string
+--- @param change_id string
+--- @param gen integer
+function M.record_change_id(root, change_id, gen)
+  op_cid[root] = { gen = gen, change_id = change_id }
+end
+
+--- Bump the generation for every active root, forcing the next refresh to
+--- re-read @'s change_id. Called on repo-internal writes that may have moved @.
+function M.invalidate()
+  for root in pairs(op_cid) do
+    op_gen[root] = (op_gen[root] or 0) + 1
+  end
+end
+
 local DEBOUNCE_MS   = 200
 local POLL_INTERVAL = 500
 
@@ -35,6 +81,9 @@ local function fire_debounced(root)
     vim.schedule(function()
       local final_w = watchers[root]
       if final_w then
+        -- Bump before the cb so refresh() (driven by the cb) sees the new
+        -- generation and re-reads @'s change_id.
+        op_gen[root] = (op_gen[root] or 0) + 1
         final_w.cb()
       end
     end)

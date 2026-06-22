@@ -275,7 +275,7 @@ function M.place(bufnr, hunks)
   end
 
   if config.config.word_diff then
-    require("jj-signs.word_diff").place_word_diff(bufnr, hunks)
+    require("jj-signs.word_diff").place_word_diff(bufnr, hunks, entry and entry.change_id)
   end
 
   -- When using the decoration provider, on_line places ephemeral extmarks per

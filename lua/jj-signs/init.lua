@@ -16,6 +16,14 @@ local M = {}
 --- skipped. Toggled by M.enable / M.disable; read by autocmds.schedule_refresh.
 M._enabled = true
 
+--- Bump every known root's op generation so the next refresh re-reads @'s
+--- change_id. Called on repo-internal writes that may have changed the op. The
+--- op-generation state lives in the watcher module (single canonical instance);
+--- see watcher.lua for why init.lua can't own it.
+function M.invalidate_op_state()
+  watcher.invalidate()
+end
+
 --- @param opts JJSigns.Config?
 function M.setup(opts)
   config.setup(opts)
@@ -112,6 +120,8 @@ function M.attach(bufnr)
     })
 
     watcher.start(root, function()
+      -- A new op landed (the watcher already bumped its generation). Invalidate
+      -- buffer caches and schedule refreshes; refresh() re-reads @'s change_id.
       cache.invalidate_all_in_root(root)
       for buf, buf_entry in pairs(cache.all()) do
         if buf_entry.root == root then
@@ -210,8 +220,23 @@ function M.refresh(bufnr)
           end
           -- Merge partial hunks into cached hunk list: replace hunks that overlap
           -- the dirty range; keep others unchanged.
+          -- Conflict rescan limited to the dirty range (defeating a whole-buffer
+          -- scan on every keystroke), expanded to cover any cached conflict the
+          -- edit overlaps so a multi-line marker starting outside the range is
+          -- not lost. Skipped entirely when the region holds no conflict marker.
+          local cfirst, clast = dr.first, dr.last
+          for _, hk in ipairs(e2.hunks) do
+            if hk.type == "conflict"
+              and (hk.added.start - 1) <= dr.last and (hk.vend - 1) >= dr.first
+            then
+              cfirst = math.min(cfirst, hk.added.start - 1)
+              clast  = math.max(clast, hk.vend - 1)
+            end
+          end
           local merged_hunks = diff_mod.replace_hunks_in_range(e2.hunks, partial, dr.first, dr.last)
-          local conflict_hunks = diff_mod.find_conflicts(bufnr)
+          local conflict_hunks = diff_mod.has_conflict_marker(bufnr, cfirst, clast + 1)
+            and diff_mod.find_conflicts(bufnr, cfirst, clast + 1)
+            or {}
           local merged = diff_mod.merge_hunks(merged_hunks, conflict_hunks)
           e2.hunks = merged
           e2.dirty = false
@@ -224,7 +249,7 @@ function M.refresh(bufnr)
         diff_mod.diff_async(base_text, buf_text, { ctxlen = 3 }, function(diff_out)
           if not api.nvim_buf_is_valid(bufnr) then return end
           local diff_hunks = (diff_out and diff_out ~= "") and diff_mod.parse_hunks(diff_out) or {}
-          local conflict_hunks = diff_mod.find_conflicts(bufnr)
+          local conflict_hunks = diff_mod.has_conflict_marker(bufnr) and diff_mod.find_conflicts(bufnr) or {}
           local merged = diff_mod.merge_hunks(diff_hunks, conflict_hunks)
           local e2 = cache.get(bufnr)
           if not e2 then return end
@@ -271,8 +296,14 @@ function M.refresh(bufnr)
     return
   end
 
-  diff_mod.get_change_id(entry.root, function(new_change_id)
+  --- @param new_change_id string?
+  --- @param read_gen integer  the op generation this change_id was read at
+  local function with_change_id(new_change_id, read_gen)
     if not new_change_id then return end
+    -- Stamp the read with the generation it was issued at. If the watcher bumped
+    -- the generation while the subprocess ran, this stamp is already stale and
+    -- the next refresh re-reads — the new op can't be lost.
+    watcher.record_change_id(entry.root, new_change_id, read_gen)
 
     local stat = (vim.uv or vim.loop).fs_stat(filepath)
     local new_mtime = stat and stat.mtime.sec or 0
@@ -300,7 +331,7 @@ function M.refresh(bufnr)
         return
       end
       if not api.nvim_buf_is_valid(bufnr) then return end
-      local conflict_hunks = diff_mod.find_conflicts(bufnr)
+      local conflict_hunks = diff_mod.has_conflict_marker(bufnr) and diff_mod.find_conflicts(bufnr) or {}
       local merged = diff_mod.merge_hunks(diff_hunks, conflict_hunks)
       cache.set(bufnr, {
         root             = entry.root,
@@ -317,7 +348,20 @@ function M.refresh(bufnr)
       signs.place(bufnr, merged)
       status.update(bufnr, merged, new_change_id)
     end)
-  end)
+  end
+
+  -- Skip the `jj log` change_id subprocess when the op-log watcher reports no new
+  -- operation since the cached read: reuse the cached change_id. The watcher bumps
+  -- the generation on every op, so a stale value can't slip through.
+  local gen = watcher.op_gen(entry.root)
+  local cached = watcher.cached_change_id(entry.root)
+  if cached then
+    with_change_id(cached, gen)
+  else
+    diff_mod.get_change_id(entry.root, function(id)
+      with_change_id(id, gen)
+    end)
+  end
 end
 
 --- Point a buffer's comparison base at `rev` and force a refresh. Invalidates the

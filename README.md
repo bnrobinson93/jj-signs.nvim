@@ -51,7 +51,6 @@ require("jj-signs").setup({
   linehl          = false,   -- highlight the full line
   word_diff       = false,   -- intra-line word highlights on changed lines
   show_deleted    = false,   -- render deleted lines as dimmed virtual text
-  update_debounce = 100,
   max_file_length = 40000,
   sign_priority   = 6,
   use_decoration_provider = true,  -- render signs lazily for visible lines only

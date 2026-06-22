@@ -328,29 +328,53 @@ function M.diff_async(base_text, buf_text, opts, cb)
 	)
 end
 
+--- Cheap guard: does a buffer region contain a conflict-start marker? A single
+--- pass with a prefix compare (no regex, no table allocation) that bails on the
+--- first hit, so callers can skip the fuller find_conflicts scan + merge when no
+--- conflict can possibly be present. `first`/`last` are 0-indexed (as passed to
+--- nvim_buf_get_lines); omit both to scan the whole buffer.
+--- @param bufnr integer
+--- @param first integer?  0-indexed start line (default 0)
+--- @param last integer?   0-indexed end line, exclusive (default -1 = end)
+--- @return boolean
+function M.has_conflict_marker(bufnr, first, last)
+	local lines = vim.api.nvim_buf_get_lines(bufnr, first or 0, last or -1, false)
+	for _, line in ipairs(lines) do
+		if line:sub(1, 7) == "<<<<<<<" then return true end
+	end
+	return false
+end
+
 --- Scan buffer lines for JJ conflict markers and return conflict hunks.
 --- JJ conflicts use: <<<<<<< Conflict N of M
+--- `first`/`last` narrow the scan to a 0-indexed line range (as passed to
+--- nvim_buf_get_lines); omit both to scan the whole buffer. Returned hunk line
+--- numbers are 1-based buffer lines regardless of the slice offset.
 --- @param bufnr integer
+--- @param first integer?  0-indexed start line (default 0)
+--- @param last integer?   0-indexed end line, exclusive (default -1 = end)
 --- @return JJSigns.Hunk[]
-function M.find_conflicts(bufnr)
-	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+function M.find_conflicts(bufnr, first, last)
+	local offset = first or 0
+	local lines = vim.api.nvim_buf_get_lines(bufnr, offset, last or -1, false)
 	local conflict_hunks = {} --- @type JJSigns.Hunk[]
 	local in_conflict = false
 	local start_lnum = 0
 
 	for i, line in ipairs(lines) do
+		local lnum = offset + i  -- 1-based buffer line
 		if line:match("^<<<<<<< Conflict") then
 			in_conflict = true
-			start_lnum = i
+			start_lnum = lnum
 		elseif line:match("^>>>>>>> Conflict") and in_conflict then
 			in_conflict = false
-			local count = i - start_lnum + 1
+			local count = lnum - start_lnum + 1
 			conflict_hunks[#conflict_hunks + 1] = {
 				type = "conflict",
 				head = "conflict",
 				added = { start = start_lnum, count = count, lines = {} },
 				removed = { start = start_lnum, count = count, lines = {} },
-				vend = i,
+				vend = lnum,
 			}
 		end
 	end

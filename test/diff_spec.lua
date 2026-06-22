@@ -197,6 +197,55 @@ describe("diff.find_conflicts", function()
   end)
 end)
 
+describe("diff.has_conflict_marker", function()
+  it("returns false for a clean buffer", function()
+    local bufnr = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "line1", "line2", "line3" })
+    eq(false, diff.has_conflict_marker(bufnr))
+    vim.api.nvim_buf_delete(bufnr, { force = true })
+  end)
+
+  it("returns true when a conflict marker is present", function()
+    local bufnr = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+      "before", "<<<<<<< Conflict 1 of 1", "after",
+    })
+    eq(true, diff.has_conflict_marker(bufnr))
+    vim.api.nvim_buf_delete(bufnr, { force = true })
+  end)
+
+  it("respects the line range", function()
+    local bufnr = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+      "<<<<<<< Conflict 1 of 1", "a", "b", "c",
+    })
+    -- marker at line 1 (0-indexed 0); range [1,4) excludes it
+    eq(false, diff.has_conflict_marker(bufnr, 1, 4))
+    eq(true, diff.has_conflict_marker(bufnr, 0, 1))
+    vim.api.nvim_buf_delete(bufnr, { force = true })
+  end)
+end)
+
+describe("diff.find_conflicts range scan", function()
+  it("scans only the given range and reports 1-based buffer lines", function()
+    local bufnr = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+      "pad",                          -- 1
+      "pad",                          -- 2
+      "<<<<<<< Conflict 1 of 1",      -- 3
+      "base",                         -- 4
+      ">>>>>>> Conflict 1 of 1 ends", -- 5
+      "tail",                         -- 6
+    })
+    -- Scan from line 3 (0-indexed 2) onward; offset preserved in output lnums.
+    local conflicts = diff.find_conflicts(bufnr, 2, 6)
+    eq(1, #conflicts)
+    eq(3, conflicts[1].added.start)
+    eq(5, conflicts[1].vend)
+    vim.api.nvim_buf_delete(bufnr, { force = true })
+  end)
+end)
+
 describe("diff.merge_hunks", function()
   it("returns diff hunks unchanged when no conflicts", function()
     local diff_hunks = {

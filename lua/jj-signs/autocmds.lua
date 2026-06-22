@@ -90,11 +90,17 @@ function M.setup()
   -- nvim_buf_attach's on_lines (see init.attach), which tracks the dirty line
   -- range so the diff can be narrowed instead of re-diffing the whole buffer.
 
-  -- Invalidate root cache when jj ops happen (repo-level changes)
+  -- Repo-internal writes (e.g. saving a file under .jj/, or a `jj workspace add`
+  -- touching repo metadata) can change which workspace root a path resolves to
+  -- and which op @ points at. Drop the cached dir→root map so the next attach
+  -- re-resolves, mark op state stale so the change_id is re-read, and invalidate
+  -- buffer caches for a fresh diff.
   api.nvim_create_autocmd("BufWritePost", {
     group   = augroup,
-    pattern = "*.jj",
+    pattern = { "*.jj", "*/.jj/*" },
     callback = function()
+      require("jj-signs.diff").clear_root_cache()
+      require("jj-signs").invalidate_op_state()
       require("jj-signs.cache").invalidate_all()
     end,
   })

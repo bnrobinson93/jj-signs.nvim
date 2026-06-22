@@ -5,7 +5,6 @@ local M = {}
 --- @field signcolumn      boolean
 --- @field numhl           boolean
 --- @field linehl          boolean
---- @field update_debounce integer
 --- @field max_file_length integer
 --- @field sign_priority   integer
 --- @field jj_cmd          string
@@ -50,7 +49,6 @@ M.defaults = {
   signcolumn      = true,
   numhl           = false,
   linehl          = false,
-  update_debounce = 100,   -- matches gitsigns default
   max_file_length = 40000, -- matches gitsigns default
   sign_priority   = 6,
   jj_cmd          = "jj",

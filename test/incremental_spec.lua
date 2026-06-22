@@ -192,3 +192,111 @@ describe("narrow diff path in refresh()", function()
     eq(true, has_far)
   end)
 end)
+
+describe("refresh() change_id subprocess skip (P11e)", function()
+  local tmpfile, bufnr, orig_get_change_id, calls
+
+  before_each(function()
+    tmpfile = vim.fn.tempname() .. ".txt"
+    local f = assert(io.open(tmpfile, "w")); f:write("a\nb\n"); f:close()
+    bufnr = vim.fn.bufadd(tmpfile); vim.fn.bufload(bufnr)
+
+    calls = 0
+    orig_get_change_id = diff.get_change_id
+    diff.get_change_id = function(_, _cb) calls = calls + 1 end
+  end)
+
+  local watcher = require("jj-signs.watcher")
+
+  after_each(function()
+    diff.get_change_id = orig_get_change_id
+    watcher._op_gen["/fake"] = nil
+    watcher._op_cid["/fake"] = nil
+    cache.clear(bufnr)
+    pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+    os.remove(tmpfile)
+  end)
+
+  local function seed()
+    cache.set(bufnr, {
+      root = "/fake", change_id = "cid", base_text = "a\nb\n",
+      mtime = 0, hunks = {}, dirty = false, base_rev = "@-",
+    })
+  end
+
+  it("reuses cached change_id (no jj log) when the op generation is unchanged", function()
+    seed()
+    watcher._op_gen["/fake"] = 1
+    watcher._op_cid["/fake"] = { gen = 1, change_id = "cid" }
+    jj_init.refresh(bufnr)
+    eq(0, calls)
+  end)
+
+  it("runs jj log when the watcher bumped the op generation", function()
+    seed()
+    watcher._op_gen["/fake"] = 2          -- watcher advanced the generation
+    watcher._op_cid["/fake"] = { gen = 1, change_id = "cid" }  -- read at an older gen
+    jj_init.refresh(bufnr)
+    eq(1, calls)
+  end)
+end)
+
+describe("refresh() conflict scan guard (P11c)", function()
+  local tmpfile, bufnr
+  local orig_get_change_id, orig_run_diff, orig_find_conflicts, orig_place
+  local fc_calls
+
+  before_each(function()
+    tmpfile = vim.fn.tempname() .. ".txt"
+    local f = assert(io.open(tmpfile, "w")); f:write("a\nb\nc\n"); f:close()
+    bufnr = vim.fn.bufadd(tmpfile); vim.fn.bufload(bufnr)
+
+    orig_get_change_id = diff.get_change_id
+    diff.get_change_id = function(_, cb) cb("cid") end
+
+    orig_run_diff = diff.run_diff
+    diff.run_diff = function(_, _, _, cb) cb({}) end
+
+    fc_calls = 0
+    orig_find_conflicts = diff.find_conflicts
+    diff.find_conflicts = function() fc_calls = fc_calls + 1; return {} end
+
+    orig_place = signs.place
+    signs.place = function() end
+  end)
+
+  after_each(function()
+    diff.get_change_id = orig_get_change_id
+    diff.run_diff = orig_run_diff
+    diff.find_conflicts = orig_find_conflicts
+    signs.place = orig_place
+    require("jj-signs.watcher")._op_gen["/fake"] = nil
+    require("jj-signs.watcher")._op_cid["/fake"] = nil
+    cache.clear(bufnr)
+    pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+    os.remove(tmpfile)
+  end)
+
+  local function seed()
+    cache.set(bufnr, {
+      root = "/fake", change_id = "old", base_text = nil,
+      mtime = 0, hunks = {}, dirty = true, base_rev = "@-",
+    })
+  end
+
+  it("skips find_conflicts when the buffer has no conflict marker", function()
+    seed()
+    jj_init.refresh(bufnr)
+    eq(0, fc_calls)
+  end)
+
+  it("scans conflicts when a marker is present", function()
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+      "x", "<<<<<<< Conflict 1 of 1", ">>>>>>> Conflict 1 of 1 ends",
+    })
+    vim.bo[bufnr].modified = false  -- keep refresh on the clean (saved) path
+    seed()
+    jj_init.refresh(bufnr)
+    eq(1, fc_calls)
+  end)
+end)
