@@ -20,6 +20,16 @@ local M = {}
 --- Build a jj command, prepending --repository when jj_repo is configured.
 --- JJ workspaces are automatically detected via cwd; jj_repo is an escape hatch
 --- for files opened outside their workspace (symlinks, remote mounts, etc.).
+---
+--- IMPORTANT: every jj invocation below passes `--ignore-working-copy`. Without
+--- it, jj auto-snapshots the working copy on each command, writing a new
+--- operation to `.jj/repo/op_heads/heads/`. The op-log watcher fires on that
+--- write and schedules a refresh, which runs another jj command, which snapshots
+--- again — an endless spawn loop (constant `jj log`/`jj diff` churn even on an
+--- idle, clean buffer; colocated git repos mint a fresh op every cycle).
+--- `--ignore-working-copy` makes these reads side-effect-free. Live edits are
+--- diffed via vim.diff against cached base text, so suppressing the implicit
+--- snapshot costs no accuracy.
 --- @param args string[]
 --- @return string[]
 local function jj(args)
@@ -67,7 +77,7 @@ end
 --- @param cb fun(change_id: string?)
 function M.get_change_id(root, cb)
 	vim.system(
-		jj({ "log", "-r", "@", "-T", "change_id", "--no-graph", "--color=never" }),
+		jj({ "log", "-r", "@", "-T", "change_id", "--no-graph", "--color=never", "--ignore-working-copy" }),
 		{ text = true, cwd = root },
 		function(result)
 			local id = nil
@@ -86,7 +96,7 @@ end
 --- @param cb fun(parent_change_id: string?, parent_commit_id: string?)
 function M.get_parent_ids(root, rev, cb)
 	vim.system(
-		jj({ "log", "-r", rev, "-T", 'change_id ++ " " ++ commit_id', "--no-graph", "--color=never" }),
+		jj({ "log", "-r", rev, "-T", 'change_id ++ " " ++ commit_id', "--no-graph", "--color=never", "--ignore-working-copy" }),
 		{ text = true, cwd = root },
 		function(result)
 			if result.code ~= 0 or not result.stdout then
@@ -107,41 +117,12 @@ end
 --- @param cb fun(base_text: string)
 function M.fetch_base(filepath, root, rev, cb)
 	vim.system(
-		jj({ "file", "show", "-r", rev, "--", filepath }),
+		jj({ "file", "show", "-r", rev, "--ignore-working-copy", "--", filepath }),
 		{ text = true, cwd = root },
 		function(result)
 			local base = result.code == 0 and result.stdout or ""
 			vim.schedule(function()
 				cb(base)
-			end)
-		end
-	)
-end
-
---- @param filepath string
---- @param root string
---- @param rev string  comparison base revision ("@-" = default @ vs its parent)
---- @param cb fun(hunks: JJSigns.Hunk[]?)
-function M.run_diff(filepath, root, rev, cb)
-	-- Default base (@-) maps to `jj diff -r @` (working copy vs its parent) — kept
-	-- byte-for-byte. A non-default base needs an explicit from/to range so the
-	-- hunks reflect that revision rather than the parent.
-	local args = (rev == "@-")
-		and { "diff", "--git", "--color=never", "-r", "@", "--", filepath }
-		or  { "diff", "--git", "--color=never", "--from", rev, "--to", "@", "--", filepath }
-	vim.system(
-		jj(args),
-		{ text = true, cwd = root },
-		function(result)
-			if result.code ~= 0 then
-				vim.schedule(function()
-					cb(nil)
-				end)
-				return
-			end
-			local hunks = M.parse_hunks(result.stdout)
-			vim.schedule(function()
-				cb(hunks)
 			end)
 		end
 	)

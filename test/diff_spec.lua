@@ -7,6 +7,41 @@ local eq = h.eq
 -- Bootstrap minimal config so diff module can reference config.config.jj_cmd
 require("jj-signs.config").setup({})
 
+describe("jj commands pass --ignore-working-copy", function()
+  -- Regression guard: jj must never auto-snapshot the working copy in response to
+  -- a read, or its op-log write re-triggers the watcher → refresh → jj read loop.
+  local orig_system, orig_schedule, captured
+  before_each(function()
+    orig_system   = vim.system
+    orig_schedule = vim.schedule
+    vim.schedule  = function(fn) fn() end
+    captured = nil
+    vim.system = function(cmd, _, cb)
+      captured = cmd
+      cb({ code = 0, stdout = "a b\n" })
+    end
+  end)
+  after_each(function()
+    vim.system   = orig_system
+    vim.schedule = orig_schedule
+  end)
+
+  local function has_flag() return captured and vim.tbl_contains(captured, "--ignore-working-copy") end
+
+  it("get_change_id", function()
+    diff.get_change_id("/r", function() end)
+    assert.is_true(has_flag(), "get_change_id missing --ignore-working-copy")
+  end)
+  it("get_parent_ids", function()
+    diff.get_parent_ids("/r", "@-", function() end)
+    assert.is_true(has_flag(), "get_parent_ids missing --ignore-working-copy")
+  end)
+  it("fetch_base", function()
+    diff.fetch_base("/r/f.txt", "/r", "@-", function() end)
+    assert.is_true(has_flag(), "fetch_base missing --ignore-working-copy")
+  end)
+end)
+
 describe("diff.parse_diff_line", function()
   it("parses an add hunk header", function()
     local hunk = diff.parse_diff_line("@@ -0,0 +1,3 @@")

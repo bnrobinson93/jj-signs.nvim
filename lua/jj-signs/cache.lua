@@ -9,6 +9,7 @@
 --- @field base_rev         string?  revision to compare against; default "@-" (parent of @)
 --- @field parent_change_id string?  change_id of base_rev when base_text was fetched
 --- @field parent_commit_id string?  commit_id of base_rev when base_text was fetched
+--- @field parent_gen        integer?  op generation at which parent ids were last resolved
 --- @field update_on_view    boolean?  true when refresh was deferred because buffer had no window
 --- @field dirty_range { first: integer, last: integer }?  dirty line range (0-indexed), nil = unknown
 

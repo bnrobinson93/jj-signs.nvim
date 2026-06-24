@@ -29,6 +29,9 @@ describe("change_base / reset_base", function()
     orig.schedule = vim.schedule
     vim.schedule = function(fn) fn() end
 
+    orig.get_change_id = diff.get_change_id
+    diff.get_change_id = function(_, cb) cb("cid") end
+
     -- Distinct parent ids per rev so base_text invalidation always triggers a
     -- fresh fetch_base for that rev.
     orig.get_parent_ids = diff.get_parent_ids
@@ -66,6 +69,7 @@ describe("change_base / reset_base", function()
 
   after_each(function()
     vim.schedule       = orig.schedule
+    diff.get_change_id = orig.get_change_id
     diff.get_parent_ids = orig.get_parent_ids
     diff.fetch_base    = orig.fetch_base
     diff.diff_async    = orig.diff_async

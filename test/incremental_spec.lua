@@ -120,7 +120,7 @@ describe("diff.replace_hunks_in_range", function()
 end)
 
 describe("narrow diff path in refresh()", function()
-  local orig_schedule, orig_get_parent_ids, orig_diff_async, orig_place, orig_find_conflicts
+  local orig_schedule, orig_get_change_id, orig_get_parent_ids, orig_diff_async, orig_place, orig_find_conflicts
   local placed
   local tmpfile, bufnr
 
@@ -131,11 +131,14 @@ describe("narrow diff path in refresh()", function()
     f:close()
     bufnr = vim.fn.bufadd(tmpfile)
     vim.fn.bufload(bufnr)
-    -- Modify so refresh() takes the modified-buffer path.
+    -- Modify so refresh() diffs the buffer against the cached base.
     vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "l1", "l2", "CHANGED", "l4", "l5" })
 
     orig_schedule = vim.schedule
     vim.schedule = function(fn) fn() end
+
+    orig_get_change_id = diff.get_change_id
+    diff.get_change_id = function(_, cb) cb("cid") end
 
     orig_get_parent_ids = diff.get_parent_ids
     diff.get_parent_ids = function(_, _, cb) cb("pcid", "ppid") end
@@ -156,6 +159,7 @@ describe("narrow diff path in refresh()", function()
 
   after_each(function()
     vim.schedule = orig_schedule
+    diff.get_change_id = orig_get_change_id
     diff.get_parent_ids = orig_get_parent_ids
     diff.diff_async = orig_diff_async
     diff.find_conflicts = orig_find_conflicts
@@ -243,19 +247,22 @@ end)
 
 describe("refresh() conflict scan guard (P11c)", function()
   local tmpfile, bufnr
-  local orig_get_change_id, orig_run_diff, orig_find_conflicts, orig_place
+  local orig_schedule, orig_diff_async, orig_find_conflicts, orig_place
   local fc_calls
+  local watcher = require("jj-signs.watcher")
 
   before_each(function()
     tmpfile = vim.fn.tempname() .. ".txt"
     local f = assert(io.open(tmpfile, "w")); f:write("a\nb\nc\n"); f:close()
     bufnr = vim.fn.bufadd(tmpfile); vim.fn.bufload(bufnr)
 
-    orig_get_change_id = diff.get_change_id
-    diff.get_change_id = function(_, cb) cb("cid") end
+    orig_schedule = vim.schedule
+    vim.schedule = function(fn) fn() end
 
-    orig_run_diff = diff.run_diff
-    diff.run_diff = function(_, _, _, cb) cb({}) end
+    -- Stub the off-thread diff so the pipeline runs synchronously and reaches the
+    -- conflict scan inside do_buf_diff.
+    orig_diff_async = diff.diff_async
+    diff.diff_async = function(_, _, _, cb) cb("") end
 
     fc_calls = 0
     orig_find_conflicts = diff.find_conflicts
@@ -266,21 +273,27 @@ describe("refresh() conflict scan guard (P11c)", function()
   end)
 
   after_each(function()
-    diff.get_change_id = orig_get_change_id
-    diff.run_diff = orig_run_diff
+    vim.schedule = orig_schedule
+    diff.diff_async = orig_diff_async
     diff.find_conflicts = orig_find_conflicts
     signs.place = orig_place
-    require("jj-signs.watcher")._op_gen["/fake"] = nil
-    require("jj-signs.watcher")._op_cid["/fake"] = nil
+    watcher._op_gen["/fake"] = nil
+    watcher._op_cid["/fake"] = nil
     cache.clear(bufnr)
     pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
     os.remove(tmpfile)
   end)
 
+  -- Seed so refresh runs no subprocess: cached change_id at the current op
+  -- generation, base text present, parent ids resolved at that generation. dirty
+  -- forces the diff (and thus the conflict scan) to run.
   local function seed()
+    watcher._op_gen["/fake"] = 1
+    watcher._op_cid["/fake"] = { gen = 1, change_id = "cid" }
     cache.set(bufnr, {
-      root = "/fake", change_id = "old", base_text = nil,
+      root = "/fake", change_id = "cid", base_text = "a\nb\nc\n",
       mtime = 0, hunks = {}, dirty = true, base_rev = "@-",
+      parent_change_id = "pcid", parent_commit_id = "ppid", parent_gen = 1,
     })
   end
 
@@ -294,7 +307,6 @@ describe("refresh() conflict scan guard (P11c)", function()
     vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
       "x", "<<<<<<< Conflict 1 of 1", ">>>>>>> Conflict 1 of 1 ends",
     })
-    vim.bo[bufnr].modified = false  -- keep refresh on the clean (saved) path
     seed()
     jj_init.refresh(bufnr)
     eq(1, fc_calls)

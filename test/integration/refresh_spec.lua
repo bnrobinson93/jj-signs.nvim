@@ -28,25 +28,14 @@ describe("integration: refresh after jj op", function()
     fixtures.cleanup(root)
   end)
 
-  it("updates hunks when file changes on disk", function()
-    local filepath = root .. "/test.lua"
-    -- Write a modified version
-    local f = assert(io.open(filepath, "w"))
-    f:write("-- original\nlocal x = 1\nlocal y = 2\n")  -- added line
-    f:close()
-
-    -- refresh()'s fast-path skips run_diff when the on-disk mtime matches the
-    -- cached one. mtime has 1-second granularity, and this write lands in the
-    -- same second as the initial refresh, so push the mtime forward to force
-    -- the disk-change path deterministically.
-    local future = os.time() + 10
-    assert((vim.uv or vim.loop).fs_utime(filepath, future, future))
+  it("updates hunks when the buffer content changes", function()
+    -- Signs reflect the live buffer (diffed against cached base via vim.diff),
+    -- so add a line to the buffer and refresh.
+    vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, { "local y = 2" })
 
     jj_init.refresh(bufnr)
 
-    -- Wait on the hunks themselves, not dirty==false: dirty is already false
-    -- from the initial refresh, so a dirty check would pass before run_diff's
-    -- async callback lands the new hunks.
+    -- Wait on the hunks themselves: the diff is async, so poll until they land.
     local ok = helpers.wait_until(function()
       local e = cache.get(bufnr)
       return e ~= nil and #e.hunks > 0

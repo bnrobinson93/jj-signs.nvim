@@ -7,8 +7,11 @@ local M = {}
 
 -- Throttled refresh: one refresh runs at a time per buffer; a call arriving
 -- mid-flight queues exactly one follow-up so no state change is dropped.
+-- Call the coroutine body inline (not M.refresh): throttle_async already runs
+-- this inside a coroutine it owns, and the body's `await`s must suspend THAT
+-- coroutine so a burst collapses into one trailing refresh (see M._refresh_impl).
 local throttled_refresh = async.throttle_async(
-  function(bufnr) require("jj-signs").refresh(bufnr) end,
+  function(bufnr) require("jj-signs")._refresh_impl(bufnr) end,
   function(bufnr) return bufnr end
 )
 

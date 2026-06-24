@@ -60,6 +60,32 @@ end
 local DEBOUNCE_MS   = 200
 local POLL_INTERVAL = 500
 
+--- Signature of a root's current op head(s): the sorted set of filenames in
+--- `.jj/repo/op_heads/heads/`. Each filename IS an operation id, so the
+--- signature changes only when a real operation lands. Every `jj` command —
+--- including the read-only `jj log`/`jj diff` this plugin runs — rewrites/touches
+--- that directory without creating a new op, which fires the fs watcher; comparing
+--- this signature lets us drop those spurious touches instead of refreshing (and
+--- spawning more `jj` commands, which touch the dir again — an endless loop).
+--- Returns nil when the directory can't be scanned (or fs_scandir is unavailable,
+--- e.g. in tests); callers treat nil as "unknown, fire anyway".
+--- @param root string
+--- @return string?
+local function read_op_sig(root)
+  local uv = get_uv()
+  if type(uv.fs_scandir) ~= "function" then return nil end
+  local fd = uv.fs_scandir(root .. "/.jj/repo/op_heads/heads/")
+  if not fd then return nil end
+  local names = {}
+  while true do
+    local name = uv.fs_scandir_next(fd)
+    if not name then break end
+    names[#names + 1] = name
+  end
+  table.sort(names)
+  return table.concat(names, "\n")
+end
+
 local function fire_debounced(root)
   local w = watchers[root]
   if not w then return end
@@ -80,12 +106,17 @@ local function fire_debounced(root)
     end
     vim.schedule(function()
       local final_w = watchers[root]
-      if final_w then
-        -- Bump before the cb so refresh() (driven by the cb) sees the new
-        -- generation and re-reads @'s change_id.
-        op_gen[root] = (op_gen[root] or 0) + 1
-        final_w.cb()
-      end
+      if not final_w then return end
+      -- Drop spurious touches: if the op head is unchanged since the last fire,
+      -- no operation landed — skip the bump + cb so we don't spawn a refresh
+      -- (which would touch op_heads again and re-trigger this watcher forever).
+      local sig = read_op_sig(root)
+      if sig ~= nil and sig == final_w.last_sig then return end
+      final_w.last_sig = sig
+      -- Bump before the cb so refresh() (driven by the cb) sees the new
+      -- generation and re-reads @'s change_id.
+      op_gen[root] = (op_gen[root] or 0) + 1
+      final_w.cb()
     end)
   end)
 end
@@ -101,7 +132,7 @@ function M.start(root, cb)
   end
 
   local target = root .. "/.jj/repo/op_heads/heads/"
-  local entry  = { handle = nil, refs = 1, cb = cb, timer = nil }
+  local entry  = { handle = nil, refs = 1, cb = cb, timer = nil, last_sig = read_op_sig(root) }
   watchers[root] = entry
 
   local uv = get_uv()

@@ -3,6 +3,7 @@ local api = vim.api
 local config     = require("jj-signs.config")
 local cache      = require("jj-signs.cache")
 local base_cache = require("jj-signs.base_cache")
+local async    = require("jj-signs.async")
 local diff_mod = require("jj-signs.diff")
 local signs    = require("jj-signs.signs")
 local hunks    = require("jj-signs.hunks")
@@ -156,13 +157,133 @@ function M.detach(bufnr)
   end
 end
 
---- Refresh signs for a buffer. Checks change_id + mtime cache before running jj diff.
---- When the buffer has unsaved changes, diffs buffer content directly so signs
---- update live without requiring a write.
---- @param bufnr integer?
-function M.refresh(bufnr)
-  bufnr = bufnr or api.nvim_get_current_buf()
+local unpack = table.unpack or _G.unpack  -- LuaJIT exposes the global form
 
+--- Suspend the running coroutine until `starter`'s callback fires, returning the
+--- callback's arguments. Production async primitives invoke their callback on a
+--- later tick (vim.system + vim.schedule, or the libuv thread pool), so the
+--- coroutine is suspended on the yield by the time they resume it. Tests, though,
+--- stub these to call back synchronously — before the yield — so this also
+--- handles the callback firing within `starter` itself: results are captured and
+--- returned without yielding at all.
+--- @param starter fun(resume: fun(...))
+--- @return any ...
+local function await(starter)
+  local co = assert(coroutine.running(), "jj-signs await: not in a coroutine")
+  local results   --- @type table?
+  local yielded = false
+  starter(function(...)
+    results = { n = select("#", ...), ... }
+    -- Only resume if we actually suspended; a synchronous callback fires before
+    -- the yield below, so there is nothing to resume — we fall through instead.
+    if yielded and coroutine.status(co) == "suspended" then
+      coroutine.resume(co)
+    end
+  end)
+  if results == nil then
+    yielded = true
+    coroutine.yield()
+  end
+  return unpack(results, 1, results.n)
+end
+
+--- Diff the (modified) buffer against cached base content and place signs.
+--- Coroutine-style: yields on the off-thread vim.diff and resumes to paint.
+--- @param bufnr integer
+--- @param base_text string
+local function do_buf_diff(bufnr, base_text)
+  if not api.nvim_buf_is_valid(bufnr) then return end
+  local e = cache.get(bufnr)
+  if not e then return end
+
+  local lines = api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local buf_text = table.concat(lines, "\n")
+  if vim.bo[bufnr].eol then buf_text = buf_text .. "\n" end
+
+  -- With a narrow dirty range, diff only that region (±3 context lines for
+  -- correct hunk boundaries) and merge the partial result into cached hunks.
+  local dr = e.dirty_range
+  if dr then
+    local ctx = 3
+    local first = math.max(0, dr.first - ctx)
+    local last  = math.min(#lines, dr.last + ctx)
+    local base_lines = vim.split(base_text, "\n")
+    local base_narrow = table.concat(vim.list_slice(base_lines, first + 1, last), "\n") .. "\n"
+    local buf_narrow  = table.concat(vim.list_slice(lines, first + 1, last), "\n") .. "\n"
+
+    local diff_out = await(function(resume)
+      diff_mod.diff_async(base_narrow, buf_narrow, { ctxlen = ctx }, resume)
+    end)
+    if not api.nvim_buf_is_valid(bufnr) then return end
+    local e2 = cache.get(bufnr)
+    if not e2 then return end
+
+    -- Adjust hunk line numbers by the slice offset
+    local partial = (diff_out and diff_out ~= "") and diff_mod.parse_hunks(diff_out) or {}
+    for _, hk in ipairs(partial) do
+      hk.added.start   = hk.added.start   + first
+      hk.vend          = hk.vend          + first
+      hk.removed.start = hk.removed.start + first
+      if hk.added.lnums then
+        for i, l in ipairs(hk.added.lnums) do
+          hk.added.lnums[i] = l + first
+        end
+      end
+    end
+
+    -- Conflict rescan limited to the dirty range (no whole-buffer scan per
+    -- keystroke), expanded to cover any cached conflict the edit overlaps so a
+    -- multi-line marker starting outside the range is not lost.
+    local cfirst, clast = dr.first, dr.last
+    for _, hk in ipairs(e2.hunks) do
+      if hk.type == "conflict"
+        and (hk.added.start - 1) <= dr.last and (hk.vend - 1) >= dr.first
+      then
+        cfirst = math.min(cfirst, hk.added.start - 1)
+        clast  = math.max(clast, hk.vend - 1)
+      end
+    end
+    local merged_hunks = diff_mod.replace_hunks_in_range(e2.hunks, partial, dr.first, dr.last)
+    local conflict_hunks = diff_mod.scan_conflicts(bufnr, cfirst, clast + 1)
+    local merged = diff_mod.merge_hunks(merged_hunks, conflict_hunks)
+    e2.hunks = merged
+    e2.dirty = false
+    e2.dirty_range = nil
+    signs.place(bufnr, merged)
+    status.update(bufnr, merged, e2.change_id)
+  else
+    -- Full diff fallback (first load or unknown range)
+    local diff_out = await(function(resume)
+      diff_mod.diff_async(base_text, buf_text, { ctxlen = 3 }, resume)
+    end)
+    if not api.nvim_buf_is_valid(bufnr) then return end
+    local diff_hunks = (diff_out and diff_out ~= "") and diff_mod.parse_hunks(diff_out) or {}
+    local conflict_hunks = diff_mod.scan_conflicts(bufnr)
+    local merged = diff_mod.merge_hunks(diff_hunks, conflict_hunks)
+    local e2 = cache.get(bufnr)
+    if not e2 then return end
+    e2.hunks = merged
+    e2.dirty = false
+    e2.dirty_range = nil
+    signs.place(bufnr, merged)
+    status.update(bufnr, merged, e2.change_id)
+  end
+end
+
+--- Coroutine body of M.refresh. Runs the full refresh pipeline with `await`
+--- between async steps, so it stays suspended (not returned) until all work
+--- completes. That is what lets the throttle (async.throttle_async) serialize a
+--- burst: `running[bufnr]` stays set across the awaits, collapsing intervening
+--- calls into a single trailing refresh instead of fanning out subprocesses.
+---
+--- Both saved and unsaved buffers diff the live buffer content against cached
+--- base text via vim.diff (off-thread). No `jj diff` runs, so the working copy is
+--- never snapshotted and the op log is never touched — which is what keeps the
+--- watcher from re-firing in a loop. The only jj reads are metadata (`jj log`
+--- change_id + parent ids) and a single `jj file show` to seat the base text,
+--- all `--ignore-working-copy`.
+--- @param bufnr integer
+local function refresh_impl(bufnr)
   if not api.nvim_buf_is_valid(bufnr) then return end
 
   local filepath = api.nvim_buf_get_name(bufnr)
@@ -176,190 +297,109 @@ function M.refresh(bufnr)
   local entry = cache.get(bufnr)
   if not entry then return end
 
-  -- Unsaved buffer: diff buffer content directly against cached parent so signs
-  -- update live. Parent content is fetched once and cached in entry.base_text;
-  -- subsequent TextChanged events run vim.diff() synchronously with no subprocess.
-  if vim.bo[bufnr].modified then
-    local function do_buf_diff(base_text)
-      if not api.nvim_buf_is_valid(bufnr) then return end
+  local base_rev = entry.base_rev or "@-"
 
-      local e = cache.get(bufnr)
-      local lines = api.nvim_buf_get_lines(bufnr, 0, -1, false)
-      local buf_text = table.concat(lines, "\n")
-      if vim.bo[bufnr].eol then buf_text = buf_text .. "\n" end
-
-      -- If we have a narrow dirty range, diff only that region.
-      -- Context lines (±3) ensure hunk boundaries are correct.
-      -- On narrow diff: produce a partial result and merge into cached hunks.
-      local dr = e and e.dirty_range
-      local use_narrow = dr ~= nil and e ~= nil and #e.hunks >= 0
-
-      if use_narrow then
-        local ctx = 3
-        local first = math.max(0, dr.first - ctx)
-        local last  = math.min(#lines, dr.last + ctx)
-        local base_lines = vim.split(base_text, "\n")
-        local base_narrow = table.concat(vim.list_slice(base_lines, first + 1, last), "\n") .. "\n"
-        local buf_narrow  = table.concat(vim.list_slice(lines, first + 1, last), "\n") .. "\n"
-
-        diff_mod.diff_async(base_narrow, buf_narrow, { ctxlen = ctx }, function(diff_out)
-          if not api.nvim_buf_is_valid(bufnr) then return end
-          local e2 = cache.get(bufnr)
-          if not e2 then return end
-          -- Adjust hunk line numbers by the slice offset
-          local partial = (diff_out and diff_out ~= "") and diff_mod.parse_hunks(diff_out) or {}
-          for _, hk in ipairs(partial) do
-            hk.added.start   = hk.added.start   + first
-            hk.vend          = hk.vend          + first
-            hk.removed.start = hk.removed.start + first
-            if hk.added.lnums then
-              for i, l in ipairs(hk.added.lnums) do
-                hk.added.lnums[i] = l + first
-              end
-            end
-          end
-          -- Merge partial hunks into cached hunk list: replace hunks that overlap
-          -- the dirty range; keep others unchanged.
-          -- Conflict rescan limited to the dirty range (defeating a whole-buffer
-          -- scan on every keystroke), expanded to cover any cached conflict the
-          -- edit overlaps so a multi-line marker starting outside the range is
-          -- not lost. Skipped entirely when the region holds no conflict marker.
-          local cfirst, clast = dr.first, dr.last
-          for _, hk in ipairs(e2.hunks) do
-            if hk.type == "conflict"
-              and (hk.added.start - 1) <= dr.last and (hk.vend - 1) >= dr.first
-            then
-              cfirst = math.min(cfirst, hk.added.start - 1)
-              clast  = math.max(clast, hk.vend - 1)
-            end
-          end
-          local merged_hunks = diff_mod.replace_hunks_in_range(e2.hunks, partial, dr.first, dr.last)
-          local conflict_hunks = diff_mod.scan_conflicts(bufnr, cfirst, clast + 1)
-          local merged = diff_mod.merge_hunks(merged_hunks, conflict_hunks)
-          e2.hunks = merged
-          e2.dirty = false
-          e2.dirty_range = nil
-          signs.place(bufnr, merged)
-          status.update(bufnr, merged, e2.change_id)
-        end)
-      else
-        -- Full diff fallback (first load or unknown range)
-        diff_mod.diff_async(base_text, buf_text, { ctxlen = 3 }, function(diff_out)
-          if not api.nvim_buf_is_valid(bufnr) then return end
-          local diff_hunks = (diff_out and diff_out ~= "") and diff_mod.parse_hunks(diff_out) or {}
-          local conflict_hunks = diff_mod.scan_conflicts(bufnr)
-          local merged = diff_mod.merge_hunks(diff_hunks, conflict_hunks)
-          local e2 = cache.get(bufnr)
-          if not e2 then return end
-          e2.hunks = merged
-          e2.dirty = false
-          e2.dirty_range = nil
-          signs.place(bufnr, merged)
-          status.update(bufnr, merged, e2.change_id)
-        end)
-      end
-    end
-
-    local base_rev = entry.base_rev or "@-"
-    diff_mod.get_parent_ids(entry.root, base_rev, function(new_pcid, new_ppid)
-      local e = cache.get(bufnr)
-      if not e then return end
-
-      if new_pcid ~= e.parent_change_id or new_ppid ~= e.parent_commit_id then
-        e.base_text = nil
-        e.parent_change_id = new_pcid
-        e.parent_commit_id = new_ppid
-      end
-
-      if e.base_text then
-        do_buf_diff(e.base_text)
-      else
-        local cached_base = base_cache.get(filepath, new_pcid, new_ppid, base_rev)
-        if cached_base then
-          e.base_text = cached_base   -- keep local entry in sync
-          do_buf_diff(cached_base)
-        else
-          diff_mod.fetch_base(filepath, e.root, base_rev, function(base_text)
-            local e2 = cache.get(bufnr)
-            if not e2 then return end
-            e2.base_text = base_text
-            e2.parent_change_id = new_pcid
-            e2.parent_commit_id = new_ppid
-            base_cache.set(filepath, new_pcid, new_ppid, base_text, base_rev)
-            do_buf_diff(base_text)
-          end)
-        end
-      end
+  -- Read @'s change_id to detect when the working-copy commit moved (jj new,
+  -- edit, abandon, …). Gated by the op-log watcher: when no operation landed
+  -- since the last read, reuse the cached id and skip the `jj log` subprocess.
+  local gen = watcher.op_gen(entry.root)
+  local new_change_id = watcher.cached_change_id(entry.root)
+  if not new_change_id then
+    new_change_id = await(function(resume)
+      diff_mod.get_change_id(entry.root, resume)
     end)
+  end
+  if not new_change_id then return end
+  entry = cache.get(bufnr)
+  if not entry then return end
+
+  -- Stamp the read with the generation it was issued at. If the watcher bumped
+  -- the generation while the subprocess ran, this stamp is already stale and the
+  -- next refresh re-reads — the new op can't be lost.
+  watcher.record_change_id(entry.root, new_change_id, gen)
+
+  -- Resolve the comparison-base parent ids only when the op generation moved
+  -- since they were last resolved (or no base content is cached). Parent ids
+  -- change only when an operation lands, so this gate avoids a `jj log` per edit.
+  if not (entry.base_text and entry.parent_gen == gen) then
+    local new_pcid, new_ppid = await(function(resume)
+      diff_mod.get_parent_ids(entry.root, base_rev, resume)
+    end)
+    entry = cache.get(bufnr)
+    if not entry then return end
+    if new_pcid ~= entry.parent_change_id or new_ppid ~= entry.parent_commit_id then
+      entry.base_text        = nil
+      entry.parent_change_id = new_pcid
+      entry.parent_commit_id = new_ppid
+    end
+    entry.parent_gen = gen
+  end
+
+  -- Ensure base content (the file as of base_rev) is cached: local entry, shared
+  -- base_cache, then a single `jj file show` scoped to this file. This is the
+  -- only jj read that touches file content.
+  if not entry.base_text then
+    local cached_base = base_cache.get(filepath, entry.parent_change_id, entry.parent_commit_id, base_rev)
+    if cached_base then
+      entry.base_text = cached_base
+    else
+      local base_text = await(function(resume)
+        diff_mod.fetch_base(filepath, entry.root, base_rev, resume)
+      end)
+      entry = cache.get(bufnr)
+      if not entry then return end
+      entry.base_text = base_text
+      base_cache.set(filepath, entry.parent_change_id, entry.parent_commit_id, base_text, base_rev)
+    end
+  end
+
+  -- Skip the diff when nothing relevant changed since the last successful one:
+  -- buffer unmodified, no pending dirty range, no cache invalidation, and @'s
+  -- change_id unchanged. Keeps repeat BufEnter / FocusGained cheap (no diff, no
+  -- subprocess — all jj reads above were already served from cache).
+  if not vim.bo[bufnr].modified
+    and not entry.dirty
+    and entry.dirty_range == nil
+    and new_change_id == entry.change_id
+    and entry.hunks ~= nil
+  then
     return
   end
 
-  --- @param new_change_id string?
-  --- @param read_gen integer  the op generation this change_id was read at
-  local function with_change_id(new_change_id, read_gen)
-    if not new_change_id then return end
-    -- Stamp the read with the generation it was issued at. If the watcher bumped
-    -- the generation while the subprocess ran, this stamp is already stale and
-    -- the next refresh re-reads — the new op can't be lost.
-    watcher.record_change_id(entry.root, new_change_id, read_gen)
+  -- Diff the buffer against the cached base via vim.diff (off-thread). do_buf_diff
+  -- handles both the narrow (dirty_range) and full cases and places the signs.
+  do_buf_diff(bufnr, entry.base_text)
 
+  entry = cache.get(bufnr)
+  if entry then
+    entry.change_id = new_change_id
+    entry.dirty     = false
     local stat = (vim.uv or vim.loop).fs_stat(filepath)
-    local new_mtime = stat and stat.mtime.sec or 0
-
-    -- Fast path: parent unchanged and we have base_text.
-    -- The file on disk == buffer content we already diffed, so jj diff would
-    -- return the same hunks. Mutate mtime in place and skip the subprocess.
-    if entry.base_text and new_change_id == entry.change_id then
-      entry.mtime     = new_mtime
-      entry.dirty     = false
-      entry.change_id = new_change_id
-      return
-    end
-
-    if not entry.dirty
-      and new_change_id == entry.change_id
-      and new_mtime == entry.mtime
-    then
-      return
-    end
-
-    diff_mod.run_diff(filepath, entry.root, entry.base_rev or "@-", function(diff_hunks)
-      if not diff_hunks then
-        signs.clear(bufnr)
-        return
-      end
-      if not api.nvim_buf_is_valid(bufnr) then return end
-      local conflict_hunks = diff_mod.scan_conflicts(bufnr)
-      local merged = diff_mod.merge_hunks(diff_hunks, conflict_hunks)
-      cache.set(bufnr, {
-        root             = entry.root,
-        change_id        = new_change_id,
-        mtime            = new_mtime,
-        hunks            = merged,
-        dirty            = false,
-        dirty_range      = nil,  -- file clean after write
-        base_text        = entry.base_text,
-        base_rev         = entry.base_rev,
-        parent_change_id = entry.parent_change_id,
-        parent_commit_id = entry.parent_commit_id,
-      })
-      signs.place(bufnr, merged)
-      status.update(bufnr, merged, new_change_id)
-    end)
+    entry.mtime = stat and stat.mtime.sec or 0
   end
+end
 
-  -- Skip the `jj log` change_id subprocess when the op-log watcher reports no new
-  -- operation since the cached read: reuse the cached change_id. The watcher bumps
-  -- the generation on every op, so a stale value can't slip through.
-  local gen = watcher.op_gen(entry.root)
-  local cached = watcher.cached_change_id(entry.root)
-  if cached then
-    with_change_id(cached, gen)
-  else
-    diff_mod.get_change_id(entry.root, function(id)
-      with_change_id(id, gen)
-    end)
-  end
+--- The coroutine body, exposed for the throttled auto-refresh path only. The
+--- throttle (async.throttle_async) already runs its callback inside a coroutine
+--- it owns; calling this inline there lets the `await`s suspend *that* coroutine,
+--- which is what serializes a burst. Do NOT call this from anywhere else — a bare
+--- `coroutine.running()` is not necessarily the throttle's (plenary runs each test
+--- in its own coroutine, other plugins may too), and yielding someone else's
+--- coroutine on an await that never resolves would deadlock it. Public callers use
+--- M.refresh, which always spins a dedicated coroutine.
+M._refresh_impl = refresh_impl
+
+--- Refresh signs for a buffer. The live buffer content is diffed against cached
+--- base text (the file as of base_rev) via vim.diff, so signs update without a
+--- write and without snapshotting the working copy.
+---
+--- Always runs the pipeline in its own coroutine (via async.run) so the `await`s
+--- never suspend the caller. The throttled auto-refresh path is the one exception
+--- and uses M._refresh_impl directly inside the throttle's own coroutine.
+--- @param bufnr integer?
+function M.refresh(bufnr)
+  bufnr = bufnr or api.nvim_get_current_buf()
+  async.run(refresh_impl, bufnr)
 end
 
 --- Point a buffer's comparison base at `rev` and force a refresh. Invalidates the
