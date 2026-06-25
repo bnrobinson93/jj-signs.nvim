@@ -116,6 +116,44 @@ describe("diff.parse_hunks", function()
     eq(2, #hunks[1].removed.lines)
   end)
 
+  it("anchors a delete hunk at the line above the deletion (ctxlen > 0)", function()
+    -- Real vim.diff output for deleting line 5 of an 8-line file with ctxlen=3.
+    -- The header new_start (2) points at the first context line, not the
+    -- deletion point. The delete sign must anchor at line 4 (above the gap).
+    local raw = table.concat({
+      "@@ -2,7 +2,6 @@",
+      " 2",
+      " 3",
+      " 4",
+      "-5",
+      " 6",
+      " 7",
+      " 8",
+    }, "\n")
+    local hunks = diff.parse_hunks(raw)
+    eq(1, #hunks)
+    eq("delete", hunks[1].type)
+    eq(4, hunks[1].added.start)
+    eq(4, hunks[1].vend)
+    eq(0, hunks[1].added.count)
+    eq(1, hunks[1].removed.count)
+  end)
+
+  it("anchors a top-of-file delete at line 0 (topdelete, ctxlen > 0)", function()
+    local raw = table.concat({
+      "@@ -1,4 +1,3 @@",
+      "-1",
+      " 2",
+      " 3",
+      " 4",
+    }, "\n")
+    local hunks = diff.parse_hunks(raw)
+    eq(1, #hunks)
+    eq("delete", hunks[1].type)
+    eq(0, hunks[1].added.start)
+    eq(0, hunks[1].vend)
+  end)
+
   it("parses a change hunk (mixed - and + lines)", function()
     local raw = table.concat({
       "@@ -5,1 +5,1 @@",

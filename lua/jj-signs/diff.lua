@@ -168,6 +168,7 @@ function M.parse_hunks(diff_output)
 	local new_line = 0
 	local first_added = nil --- @type integer?
 	local last_added = nil --- @type integer?
+	local first_removed_nl = nil --- @type integer?  new-file line at first removed line
 
 	local function finalize()
 		if not current then return end
@@ -176,6 +177,15 @@ function M.parse_hunks(diff_output)
 			current.added.start = first_added
 			current.vend = last_added --[[@as integer]]
 			current.added.count = #current.added.lines
+		elseif #current.removed.lines > 0 then
+			-- Pure deletion. The diff header's new_start points at the first
+			-- *context* line (ctxlen > 0), not the deletion point. The real
+			-- anchor is the new-file line directly above the removed block:
+			-- new_line at the first "-" minus one (0 => top-of-file delete).
+			local anchor = math.max((first_removed_nl or current.added.start) - 1, 0)
+			current.added.start = anchor
+			current.vend = anchor
+			current.added.count = 0
 		end
 		if #current.added.lines == 0 then
 			current.type = "delete"
@@ -194,6 +204,7 @@ function M.parse_hunks(diff_output)
 			new_line = current.added.start
 			first_added = nil
 			last_added = nil
+			first_removed_nl = nil
 		elseif current then
 			local c = line:sub(1, 1)
 			if c == "+" then
@@ -203,6 +214,7 @@ function M.parse_hunks(diff_output)
 				current.added.lnums[#current.added.lnums + 1] = new_line
 				new_line = new_line + 1
 			elseif c == "-" then
+				if not first_removed_nl then first_removed_nl = new_line end
 				current.removed.lines[#current.removed.lines + 1] = line:sub(2)
 			elseif c == " " then
 				new_line = new_line + 1
