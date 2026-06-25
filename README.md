@@ -73,11 +73,12 @@ require("jj-signs").setup({
   },
 
   -- vim.diff()/xdiff tuning, mirroring gitsigns' diff_opts. Affects how hunks
-  -- are computed and aligned. Defaults reproduce vim.diff's built-in behavior.
+  -- are computed and aligned. indent_heuristic and linematch default on (as in
+  -- gitsigns / Neovim's diffopt) for nicer hunk boundaries and tighter changes.
   diff_opts = {
     algorithm                = "myers", -- "myers" | "minimal" | "patience" | "histogram"
-    indent_heuristic         = false,   -- shift hunk boundaries to align with indentation
-    linematch                = nil,      -- integer: second-stage line matching within hunks (nil = off)
+    indent_heuristic         = true,    -- shift hunk boundaries to align with indentation
+    linematch                = 60,       -- integer: second-stage line matching within hunks (false = off)
     ignore_whitespace        = false,   -- ignore all whitespace
     ignore_whitespace_change = false,   -- ignore changes in whitespace amount
   },
@@ -114,6 +115,7 @@ Default keymaps are buffer-local and set during attach. They match [LazyVim's gi
 | `<leader>ghp`   | n       | Preview hunk in floating window         |
 | `<leader>ghP`   | n       | Preview hunk inline (virtual lines)     |
 | `<leader>ghr`   | n       | Restore hunk to `@-` state             |
+| `<leader>ghR`   | n       | Reset whole buffer to `@-` state       |
 | `<leader>ghd`   | n       | Diff current file vs `@-` in vimdiff   |
 | `<leader>ghD`   | n       | Diff vs a prompted revision             |
 | `<leader>ghb`   | n       | Blame line: change description popup    |
@@ -137,6 +139,7 @@ require("jj-signs").setup({
     map("n", "[h",          function() jj.nav_hunk("prev")  end, "Prev JJ hunk")
     map("n", "<leader>ghp", jj.preview_hunk,                    "Preview JJ hunk")
     map("n", "<leader>ghr", jj.restore_hunk,                    "Restore hunk from @-")
+    map("n", "<leader>ghR", jj.reset_buffer,                    "Reset buffer to @-")
     map({"x","o"}, "ih",    jj.select_hunk,                     "Select hunk")
   end,
 })
@@ -237,6 +240,7 @@ require("jj-signs").setup({
 | `preview_hunk()` | Float showing removed/added lines |
 | `preview_hunk_inline()` | Inline preview: removed lines as dimmed virtual lines above the hunk + highlighted added lines, cleared on the next cursor move (no float) |
 | `restore_hunk()` | Replace hunk lines with `@-` content via buffer API |
+| `reset_buffer()` | Reset the whole buffer to `@-` content (discards all working-copy changes) |
 | `select_hunk(bufnr?)` | Set visual selection to hunk lines |
 | `diffthis(rev?)` | Open vimdiff vs `rev` (default `"@-"`) |
 | `diffthis_rev()` | Prompt for revision, then open vimdiff |
@@ -288,6 +292,7 @@ tab-completes:
 :JJSigns preview_hunk
 :JJSigns preview_hunk_inline
 :JJSigns restore_hunk
+:JJSigns reset_buffer      " reset whole buffer to @- (discards changes)
 :JJSigns blame_line full   " popup with diff; omit 'full' for message-only
 :JJSigns blame             " full-file blame split
 :JJSigns refresh
@@ -307,7 +312,7 @@ optional explicit value, e.g. `require("jj-signs").toggle_signs(false)`.
 
 Positional args after the action are forwarded to the function (e.g.
 `nav_hunk next`, `diffthis @--`). Available actions: `nav_hunk`, `preview_hunk`,
-`restore_hunk`, `diffthis`, `diffthis_rev`, `change_base`, `reset_base`, `blame_line`, `blame`, `select_hunk`, `refresh`,
+`restore_hunk`, `reset_buffer`, `diffthis`, `diffthis_rev`, `change_base`, `reset_base`, `blame_line`, `blame`, `select_hunk`, `refresh`,
 `refresh_all`, `attach`, `detach`, `detach_all`, `enable`, `disable`,
 `get_hunks`, `is_attached`, `toggle_current_line_blame`, `toggle_signs`,
 `toggle_numhl`, `toggle_linehl`, `toggle_word_diff`, `toggle_deleted`,

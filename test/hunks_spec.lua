@@ -261,6 +261,38 @@ describe("hunks.restore_hunk", function()
   end)
 end)
 
+describe("hunks.reset_buffer", function()
+  local cache = require("jj-signs.cache")
+  local api   = vim.api
+
+  local function make_buf(lines, base_text)
+    local tmp = vim.fn.tempname()
+    local f = io.open(tmp, "w"); f:write(table.concat(lines, "\n") .. "\n"); f:close()
+    local bufnr = api.nvim_create_buf(false, false)
+    api.nvim_buf_set_name(bufnr, tmp)
+    api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+    cache.set(bufnr, { root = "/tmp", change_id = "t", mtime = 0, hunks = {}, dirty = false, base_text = base_text })
+    api.nvim_set_current_buf(bufnr)
+    return bufnr
+  end
+
+  after_each(function()
+    for _, bufnr in ipairs(api.nvim_list_bufs()) do cache.clear(bufnr) end
+  end)
+
+  it("restores the whole buffer to base, dropping the trailing newline", function()
+    local bufnr = make_buf({ "x", "CHANGED", "z", "extra" }, "x\ny\nz\n")
+    M.reset_buffer(bufnr)
+    eq({ "x", "y", "z" }, api.nvim_buf_get_lines(bufnr, 0, -1, false))
+  end)
+
+  it("does nothing (warns) when no base_text is cached", function()
+    local bufnr = make_buf({ "a", "b" }, nil)
+    M.reset_buffer(bufnr)
+    eq({ "a", "b" }, api.nvim_buf_get_lines(bufnr, 0, -1, false))
+  end)
+end)
+
 describe("hunks.preview_hunk_inline", function()
   local cache = require("jj-signs.cache")
   local api   = vim.api

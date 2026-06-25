@@ -354,13 +354,21 @@ describe("diff.build_diff_opts", function()
     eq(true, o.ignore_whitespace_change)
   end)
 
-  it("defaults to myers with whitespace flags and linematch unset", function()
+  it("defaults to myers with indent_heuristic and linematch on, whitespace off", function()
     config.setup({})
     local o = diff.build_diff_opts()
     eq("myers", o.algorithm)
-    eq(false, o.indent_heuristic)
+    eq(true, o.indent_heuristic)
+    eq(60, o.linematch)
     eq(nil, o.ignore_whitespace)
     eq(nil, o.ignore_whitespace_change)
+  end)
+
+  it("disables linematch when set to nil", function()
+    config.setup({ diff_opts = { linematch = nil } })
+    -- tbl_deep_extend keeps the default (60); explicit false/0 turns it off.
+    config.setup({ diff_opts = { linematch = false } })
+    local o = diff.build_diff_opts()
     eq(nil, o.linematch)
   end)
 

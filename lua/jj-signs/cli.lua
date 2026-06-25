@@ -16,6 +16,7 @@ local subcommands = {
   "preview_hunk",
   "preview_hunk_inline",
   "restore_hunk",
+  "reset_buffer",
   "diffthis",
   "diffthis_rev",
   "change_base",

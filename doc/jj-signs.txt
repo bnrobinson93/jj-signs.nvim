@@ -83,8 +83,8 @@ All options shown with defaults: >lua
       },
       diff_opts = {
         algorithm                = "myers",
-        indent_heuristic         = false,
-        linematch                = nil,
+        indent_heuristic         = true,
+        linematch                = 60,    -- false = off
         ignore_whitespace        = false,
         ignore_whitespace_change = false,
       },
@@ -136,7 +136,7 @@ tab-completes. >vim
     :JJSigns setqflist attached " hunks across all buffers -> quickfix
 <
 Available actions: nav_hunk, preview_hunk, preview_hunk_inline, restore_hunk,
-diffthis, diffthis_rev, change_base, reset_base, blame_line, blame,
+reset_buffer, diffthis, diffthis_rev, change_base, reset_base, blame_line, blame,
 select_hunk, refresh, refresh_all, attach, detach, detach_all, enable, disable,
 get_hunks, is_attached, toggle_current_line_blame, toggle_signs, toggle_numhl,
 toggle_linehl, toggle_word_diff, toggle_deleted, setqflist, setloclist.
@@ -166,6 +166,8 @@ All functions are fields of `require("jj-signs")`.
     preview_hunk()            Float showing removed/added lines.
     preview_hunk_inline()     Inline preview via virtual lines (no float).
     restore_hunk()            Replace hunk lines with @- content (buffer API).
+    reset_buffer()            Reset the whole buffer to @- content, discarding
+                              all working-copy changes (buffer-wide restore).
     select_hunk(bufnr?)       Set visual selection to hunk lines.
     diffthis(rev?)            Open vimdiff vs rev (default "@-").
     diffthis_rev()            Prompt for a revision, then open vimdiff.
@@ -223,6 +225,7 @@ nil). They match LazyVim's gitsigns layout.
     <leader>ghp   n       Preview hunk in floating window
     <leader>ghP   n       Preview hunk inline (virtual lines)
     <leader>ghr   n       Restore hunk to @- state
+    <leader>ghR   n       Reset whole buffer to @- state
     <leader>ghd   n       Diff current file vs @- in vimdiff
     <leader>ghD   n       Diff vs a prompted revision
     <leader>ghb   n       Blame line: change description popup

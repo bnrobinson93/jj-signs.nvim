@@ -132,6 +132,67 @@ describe("diff.replace_hunks_in_range", function()
   end)
 end)
 
+describe("CRLF / fileformat normalization", function()
+  -- jj file show returns committed bytes verbatim (CRLF for a dos file), but
+  -- nvim_buf_get_lines is always LF. Without folding the base to LF, every line
+  -- of a non-unix file reads as changed.
+  local orig_schedule, orig_get_change_id, orig_get_parent_ids, orig_diff_async,
+        orig_place, orig_find_conflicts
+  local placed, tmpfile, bufnr
+
+  before_each(function()
+    tmpfile = vim.fn.tempname() .. ".txt"
+    local f = assert(io.open(tmpfile, "wb")); f:write("a\r\nb\r\nc\r\n"); f:close()
+    bufnr = vim.fn.bufadd(tmpfile); vim.fn.bufload(bufnr)
+    vim.bo[bufnr].fileformat = "dos"
+
+    orig_schedule = vim.schedule; vim.schedule = function(fn) fn() end
+    orig_get_change_id = diff.get_change_id; diff.get_change_id = function(_, cb) cb("cid") end
+    orig_get_parent_ids = diff.get_parent_ids; diff.get_parent_ids = function(_, _, cb) cb("pcid", "ppid") end
+    orig_diff_async = diff.diff_async
+    diff.diff_async = function(base_text, buf_text, opts, cb)
+      cb(vim.diff(base_text, buf_text, { result_type = "unified", ctxlen = opts.ctxlen or 0 }))
+    end
+    orig_find_conflicts = diff.find_conflicts; diff.find_conflicts = function() return {} end
+    orig_place = signs.place; placed = nil; signs.place = function(_, m) placed = m end
+  end)
+
+  after_each(function()
+    vim.schedule = orig_schedule
+    diff.get_change_id = orig_get_change_id
+    diff.get_parent_ids = orig_get_parent_ids
+    diff.diff_async = orig_diff_async
+    diff.find_conflicts = orig_find_conflicts
+    signs.place = orig_place
+    cache.clear(bufnr); pcall(vim.api.nvim_buf_delete, bufnr, { force = true }); os.remove(tmpfile)
+  end)
+
+  local function seed()
+    cache.set(bufnr, {
+      root = "/fake", change_id = "cid", mtime = 0, hunks = {}, dirty = true,
+      base_text = "a\r\nb\r\nc\r\n",  -- CRLF base
+      parent_change_id = "pcid", parent_commit_id = "ppid",
+    })
+  end
+
+  it("reports no diff when a dos buffer matches its CRLF base", function()
+    -- buffer (LF lines a,b,c) == base (a,b,c with CRLF) after normalization.
+    seed()
+    jj_init.refresh(bufnr)
+    assert.is_not_nil(placed)
+    eq(0, #placed)
+  end)
+
+  it("reports exactly one hunk for a single real change in a dos buffer", function()
+    vim.api.nvim_buf_set_lines(bufnr, 1, 2, false, { "B" })  -- b -> B
+    seed()
+    jj_init.refresh(bufnr)
+    assert.is_not_nil(placed)
+    eq(1, #placed)
+    eq(2, placed[1].added.start)
+  end)
+end)
+
 describe("narrow diff path in refresh()", function()
   local orig_schedule, orig_get_change_id, orig_get_parent_ids, orig_diff_async, orig_place, orig_find_conflicts
   local placed

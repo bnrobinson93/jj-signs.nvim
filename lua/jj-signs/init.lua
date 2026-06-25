@@ -58,6 +58,7 @@ local function default_keymaps(bufnr)
   map("n", "<leader>ghp", function() M.preview_hunk()        end, "Preview JJ hunk")
   map("n", "<leader>ghP", function() M.preview_hunk_inline() end, "Preview JJ hunk (inline)")
   map("n", "<leader>ghr", function() M.restore_hunk()    end, "Restore JJ hunk from @-")
+  map("n", "<leader>ghR", function() M.reset_buffer()    end, "Reset JJ buffer to @-")
   map("n", "<leader>ghd", function() M.diffthis()        end, "Diff this vs @-")
   map("n", "<leader>ghD", function() M.diffthis_rev()    end, "Diff this vs revision…")
   map("n", "<leader>ghb", function() M.blame_line({ full = true }) end, "Blame line (popup)")
@@ -206,6 +207,18 @@ local function do_buf_diff(bufnr, base_text)
   local lines = api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local buf_text = table.concat(lines, "\n")
   if vim.bo[bufnr].eol then buf_text = buf_text .. "\n" end
+
+  -- Normalize base line endings to the buffer's. nvim_buf_get_lines strips line
+  -- terminators, so buf_text is always LF-joined, but `jj file show` returns the
+  -- committed bytes verbatim — CRLF for a dos file, CR for a mac file. Without
+  -- this, every line of a non-unix file reads as changed. Match gitsigns: fold
+  -- the base to LF for the comparison (the cached/shared base_text stays raw).
+  local ff = vim.bo[bufnr].fileformat
+  if ff == "dos" then
+    base_text = (base_text:gsub("\r\n", "\n"))
+  elseif ff == "mac" then
+    base_text = (base_text:gsub("\r", "\n"))
+  end
 
   -- With a narrow dirty range, diff only that region (±3 context lines for
   -- correct hunk boundaries) and merge the partial result into cached hunks.
@@ -560,6 +573,12 @@ end
 
 function M.restore_hunk()
   hunks.restore_hunk(api.nvim_get_current_buf())
+end
+
+--- Reset the entire buffer to the comparison base (default @-), discarding all
+--- working-copy changes. Buffer-wide counterpart to restore_hunk.
+function M.reset_buffer()
+  hunks.reset_buffer(api.nvim_get_current_buf())
 end
 
 function M.diffthis(rev)

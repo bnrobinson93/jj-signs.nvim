@@ -267,6 +267,26 @@ function M.restore_hunk(bufnr)
   vim.cmd("silent! write!")
 end
 
+--- Reset the whole buffer to the comparison-base content (base_rev, default @-),
+--- discarding every working-copy change. The gitsigns `reset_buffer` analog and
+--- the buffer-wide counterpart to restore_hunk. base_text is the cached file as
+--- of base_rev; nvim_buf_get_lines-style splitting drops the trailing newline.
+--- @param bufnr integer?
+function M.reset_buffer(bufnr)
+  bufnr = bufnr or api.nvim_get_current_buf()
+  local entry = cache.get(bufnr)
+  if not entry or not entry.base_text then
+    vim.notify("jj-signs: no base content to reset to", vim.log.levels.WARN)
+    return
+  end
+
+  local base_lines = vim.split(entry.base_text, "\n")
+  if base_lines[#base_lines] == "" then table.remove(base_lines) end
+
+  api.nvim_buf_set_lines(bufnr, 0, -1, false, base_lines)
+  vim.cmd("silent! write!")
+end
+
 function M.diffthis(rev)
 	rev = rev or "@-"
 	local bufnr = api.nvim_get_current_buf()

@@ -18,7 +18,7 @@ local M = {}
 --- @class JJSigns.DiffOpts
 --- @field algorithm                "myers"|"minimal"|"patience"|"histogram"  xdiff algorithm
 --- @field indent_heuristic         boolean      shift hunk boundaries for nicer alignment
---- @field linematch                integer?     second-stage line matching (nil = off)
+--- @field linematch                integer|false|nil  second-stage line matching (false = off)
 --- @field ignore_whitespace        boolean      ignore all whitespace (vim.diff ignore_whitespace)
 --- @field ignore_whitespace_change boolean      ignore whitespace amount changes (vim.diff ignore_whitespace_change)
 
@@ -90,12 +90,15 @@ M.defaults = {
     foldopen           = true,  -- open folds at the destination
     preview            = false, -- true = float, "inline" = virtual lines
   },
-  -- vim.diff()/xdiff tuning, mirroring gitsigns' diff_opts. Defaults reproduce
-  -- vim.diff's built-in behavior (myers, no whitespace folding).
+  -- vim.diff()/xdiff tuning, mirroring gitsigns' diff_opts. indent_heuristic and
+  -- linematch are on by default (as in gitsigns / Neovim's diffopt): the former
+  -- lands hunk boundaries on the intuitive side (e.g. an added block's brace or
+  -- blank line), the latter refines change blocks into tighter add/delete
+  -- sub-hunks for cleaner signs and word-diff. Set linematch = false to disable.
   diff_opts = {
     algorithm                = "myers", -- "myers" | "minimal" | "patience" | "histogram"
-    indent_heuristic         = false,   -- shift hunk boundaries for nicer alignment
-    linematch                = nil,      -- integer second-stage line matching, nil = off
+    indent_heuristic         = true,    -- shift hunk boundaries for nicer alignment
+    linematch                = 60,       -- integer second-stage line matching, nil = off
     ignore_whitespace        = false,   -- ignore all whitespace (vim.diff ignore_whitespace)
     ignore_whitespace_change = false,   -- ignore whitespace amount changes (vim.diff ignore_whitespace_change)
   },
