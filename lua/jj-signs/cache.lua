@@ -12,6 +12,7 @@
 --- @field parent_gen        integer?  op generation at which parent ids were last resolved
 --- @field update_on_view    boolean?  true when refresh was deferred because buffer had no window
 --- @field dirty_range { first: integer, last: integer }?  dirty line range (0-indexed), nil = unknown
+--- @field needs_full_diff boolean?  set when a line-count-changing edit makes the narrow diff path unsafe; forces a whole-buffer re-diff
 
 --- @type table<integer, JJSigns.CacheEntry>
 local cache = {}

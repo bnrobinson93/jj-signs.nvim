@@ -106,9 +106,16 @@ function M.attach(bufnr)
     -- buffer on every TextChanged. on_lines reports the changed line region;
     -- we union it into entry.dirty_range so refresh() can narrow the diff.
     api.nvim_buf_attach(bufnr, false, {
-      on_lines = function(_, buf, _, first, _last_old, last_new, _)
+      on_lines = function(_, buf, _, first, last_old, last_new, _)
         local e = cache.get(buf)
         if not e then return true end  -- return true to detach
+        -- A line-count-changing edit (insert/delete) shifts every cached hunk
+        -- below it. The narrow path only re-diffs the dirty window, so those
+        -- below-hunks would keep stale positions. Flag a full re-diff for the
+        -- next refresh; the narrow path stays for in-place edits (no shift).
+        if last_new ~= last_old then
+          e.needs_full_diff = true
+        end
         -- Union new dirty range with existing dirty range
         if not e.dirty_range then
           e.dirty_range = { first = first, last = last_new }
@@ -202,17 +209,49 @@ local function do_buf_diff(bufnr, base_text)
 
   -- With a narrow dirty range, diff only that region (±3 context lines for
   -- correct hunk boundaries) and merge the partial result into cached hunks.
+  -- needs_full_diff forces the whole-buffer path after a line-count-changing
+  -- edit, which would otherwise leave cached below-hunks at stale positions.
   local dr = e.dirty_range
+  if e.needs_full_diff then dr = nil end
   if dr then
     local ctx = 3
     local first = math.max(0, dr.first - ctx)
     local last  = math.min(#lines, dr.last + ctx)
     local base_lines = vim.split(base_text, "\n")
-    local base_narrow = table.concat(vim.list_slice(base_lines, first + 1, last), "\n") .. "\n"
+    -- vim.split keeps a trailing "" for the final newline; real line count drops it.
+    local base_real = base_lines[#base_lines] == "" and (#base_lines - 1) or #base_lines
+
+    -- The base window must cover the SAME content as the buffer window. Slicing
+    -- both by identical line numbers is wrong whenever the edit changed the line
+    -- count: below the edit, base and buffer drift apart by the net delta, so an
+    -- equal-numbered base slice pulls in a shifted line (a deletion shows a
+    -- spurious "-x/+y" change instead of a clean delete). Map the window edges
+    -- into base coordinates using the cached (pre-edit) hunks plus the total
+    -- line delta. Above the window top: net (removed-added) of hunks fully above
+    -- it. The bottom edge sits below the current edit, so its offset is the total
+    -- delta minus the net of hunks strictly below the window.
+    local total_delta = base_real - #lines
+    local net_above_top, net_below_bot = 0, 0
+    for _, h in ipairs(e.hunks or {}) do
+      local hdelta = (h.removed.count or 0) - (h.added.count or 0)
+      if h.vend < first + 1 then
+        net_above_top = net_above_top + hdelta
+      elseif h.added.start > last then
+        net_below_bot = net_below_bot + hdelta
+      end
+    end
+    local bfirst = math.max(1, first + 1 + net_above_top)
+    local blast  = math.max(bfirst - 1, math.min(last + total_delta - net_below_bot, base_real))
+
+    local base_narrow = table.concat(vim.list_slice(base_lines, bfirst, blast), "\n") .. "\n"
     local buf_narrow  = table.concat(vim.list_slice(lines, first + 1, last), "\n") .. "\n"
 
+    -- ctxlen = 0: emit minimal, separate hunks (no shared context lines). The
+    -- ±ctx slice above only supplies surrounding lines so vim.diff anchors the
+    -- region correctly; the hunk *output* must stay un-merged so an adjacent
+    -- delete keeps its own marker instead of folding into a neighbouring change.
     local diff_out = await(function(resume)
-      diff_mod.diff_async(base_narrow, buf_narrow, { ctxlen = ctx }, resume)
+      diff_mod.diff_async(base_narrow, buf_narrow, { ctxlen = 0 }, resume)
     end)
     if not api.nvim_buf_is_valid(bufnr) then return end
     local e2 = cache.get(bufnr)
@@ -223,7 +262,7 @@ local function do_buf_diff(bufnr, base_text)
     for _, hk in ipairs(partial) do
       hk.added.start   = hk.added.start   + first
       hk.vend          = hk.vend          + first
-      hk.removed.start = hk.removed.start + first
+      hk.removed.start = hk.removed.start + (bfirst - 1)
       if hk.added.lnums then
         for i, l in ipairs(hk.added.lnums) do
           hk.added.lnums[i] = l + first
@@ -249,12 +288,15 @@ local function do_buf_diff(bufnr, base_text)
     e2.hunks = merged
     e2.dirty = false
     e2.dirty_range = nil
+    e2.needs_full_diff = false
     signs.place(bufnr, merged)
     status.update(bufnr, merged, e2.change_id)
   else
-    -- Full diff fallback (first load or unknown range)
+    -- Full diff fallback (first load or unknown range). ctxlen = 0 keeps each
+    -- add/change/delete a separate minimal hunk, so an isolated deletion renders
+    -- its own delete sign instead of merging into a nearby change.
     local diff_out = await(function(resume)
-      diff_mod.diff_async(base_text, buf_text, { ctxlen = 3 }, resume)
+      diff_mod.diff_async(base_text, buf_text, { ctxlen = 0 }, resume)
     end)
     if not api.nvim_buf_is_valid(bufnr) then return end
     local diff_hunks = (diff_out and diff_out ~= "") and diff_mod.parse_hunks(diff_out) or {}
@@ -265,6 +307,7 @@ local function do_buf_diff(bufnr, base_text)
     e2.hunks = merged
     e2.dirty = false
     e2.dirty_range = nil
+    e2.needs_full_diff = false
     signs.place(bufnr, merged)
     status.update(bufnr, merged, e2.change_id)
   end
@@ -416,6 +459,7 @@ local function apply_base(bufnr, entry, rev)
   entry.parent_commit_id = nil
   entry.dirty            = true
   entry.dirty_range      = nil
+  entry.needs_full_diff  = nil
   M.refresh(bufnr)
 end
 

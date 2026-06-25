@@ -92,6 +92,19 @@ describe("on_lines dirty_range tracking", function()
     cache.clear(bufnr)
     eq(true, captured_on_lines(nil, bufnr, nil, 0, 1, 2, nil))
   end)
+
+  it("flags needs_full_diff on a line-count-changing edit, not an in-place one", function()
+    jj_init.attach(bufnr)
+    local e = cache.get(bufnr)
+
+    -- In-place edit (last_old == last_new): narrow path stays valid.
+    captured_on_lines(nil, bufnr, nil, 2, 3, 3, nil)
+    assert.is_not_true(e.needs_full_diff)
+
+    -- Line deleted (last_new < last_old): below-hunks shift -> force full diff.
+    captured_on_lines(nil, bufnr, nil, 2, 3, 2, nil)
+    eq(true, e.needs_full_diff)
+  end)
 end)
 
 describe("diff.replace_hunks_in_range", function()
@@ -194,6 +207,167 @@ describe("narrow diff path in refresh()", function()
       if hk.added.start == 99 then has_far = true end
     end
     eq(true, has_far)
+  end)
+end)
+
+describe("narrow diff path: deletion alignment", function()
+  -- Regression: deleting a line made the narrow path slice base & buffer by the
+  -- same line numbers. Below the deletion the two drift apart by the line delta,
+  -- so the equal-numbered base slice pulled in a shifted line — the deletion
+  -- rendered as a spurious "-x/+y" change marker instead of a clean delete sign.
+  local orig_schedule, orig_get_change_id, orig_get_parent_ids, orig_diff_async,
+        orig_place, orig_find_conflicts
+  local placed, tmpfile, bufnr
+
+  before_each(function()
+    tmpfile = vim.fn.tempname() .. ".txt"
+    local f = assert(io.open(tmpfile, "w"))
+    f:write("l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\n")
+    f:close()
+    bufnr = vim.fn.bufadd(tmpfile)
+    vim.fn.bufload(bufnr)
+    -- Delete line 5 (l5).
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "l1", "l2", "l3", "l4", "l6", "l7", "l8" })
+
+    orig_schedule = vim.schedule
+    vim.schedule = function(fn) fn() end
+
+    orig_get_change_id = diff.get_change_id
+    diff.get_change_id = function(_, cb) cb("cid") end
+    orig_get_parent_ids = diff.get_parent_ids
+    diff.get_parent_ids = function(_, _, cb) cb("pcid", "ppid") end
+
+    -- Real vim.diff on exactly the (base_narrow, buf_narrow) the path computed,
+    -- so the slice alignment is what is under test.
+    orig_diff_async = diff.diff_async
+    diff.diff_async = function(base_narrow, buf_narrow, opts, cb)
+      cb(vim.diff(base_narrow, buf_narrow, { result_type = "unified", ctxlen = opts.ctxlen or 3 }))
+    end
+
+    orig_find_conflicts = diff.find_conflicts
+    diff.find_conflicts = function() return {} end
+
+    orig_place = signs.place
+    placed = nil
+    signs.place = function(_, merged) placed = merged end
+  end)
+
+  after_each(function()
+    vim.schedule = orig_schedule
+    diff.get_change_id = orig_get_change_id
+    diff.get_parent_ids = orig_get_parent_ids
+    diff.diff_async = orig_diff_async
+    diff.find_conflicts = orig_find_conflicts
+    signs.place = orig_place
+    cache.clear(bufnr)
+    pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+    os.remove(tmpfile)
+  end)
+
+  it("produces a single clean delete hunk anchored above the gap", function()
+    cache.set(bufnr, {
+      root             = "/fake",
+      change_id        = "cid",
+      mtime            = 0,
+      hunks            = {},
+      dirty            = true,
+      dirty_range      = { first = 4, last = 4 },  -- 0-indexed: deleted line 5
+      base_text        = "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\n",
+      parent_change_id = "pcid",
+      parent_commit_id = "ppid",
+    })
+
+    jj_init.refresh(bufnr)
+
+    assert.is_not_nil(placed)
+    eq(1, #placed)
+    eq("delete", placed[1].type)
+    eq(4, placed[1].added.start)  -- anchored on the line above the deletion
+    eq(4, placed[1].vend)
+  end)
+end)
+
+describe("needs_full_diff: change below a deletion", function()
+  -- Regression: a line-count-changing edit left cached below-hunks at stale
+  -- positions when the narrow path ran. needs_full_diff forces a whole-buffer
+  -- re-diff so a change below a deletion lands at its shifted (correct) line.
+  local orig_schedule, orig_get_change_id, orig_get_parent_ids, orig_diff_async,
+        orig_place, orig_find_conflicts
+  local placed, captured_base, tmpfile, bufnr
+
+  before_each(function()
+    tmpfile = vim.fn.tempname() .. ".txt"
+    local f = assert(io.open(tmpfile, "w"))
+    local b = {} for i = 1, 16 do b[i] = "L" .. i end
+    f:write(table.concat(b, "\n") .. "\n")
+    f:close()
+    bufnr = vim.fn.bufadd(tmpfile)
+    vim.fn.bufload(bufnr)
+    -- Deleted L3, changed L12 -> X12.
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+      "L1", "L2", "L4", "L5", "L6", "L7", "L8", "L9", "L10", "L11", "X12", "L13", "L14", "L15", "L16",
+    })
+
+    orig_schedule = vim.schedule
+    vim.schedule = function(fn) fn() end
+    orig_get_change_id = diff.get_change_id
+    diff.get_change_id = function(_, cb) cb("cid") end
+    orig_get_parent_ids = diff.get_parent_ids
+    diff.get_parent_ids = function(_, _, cb) cb("pcid", "ppid") end
+
+    orig_diff_async = diff.diff_async
+    diff.diff_async = function(base_text, buf_text, opts, cb)
+      captured_base = base_text
+      cb(vim.diff(base_text, buf_text, { result_type = "unified", ctxlen = opts.ctxlen or 3 }))
+    end
+    orig_find_conflicts = diff.find_conflicts
+    diff.find_conflicts = function() return {} end
+    orig_place = signs.place
+    placed = nil
+    signs.place = function(_, merged) placed = merged end
+  end)
+
+  after_each(function()
+    vim.schedule = orig_schedule
+    diff.get_change_id = orig_get_change_id
+    diff.get_parent_ids = orig_get_parent_ids
+    diff.diff_async = orig_diff_async
+    diff.find_conflicts = orig_find_conflicts
+    signs.place = orig_place
+    cache.clear(bufnr)
+    pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+    os.remove(tmpfile)
+  end)
+
+  it("re-diffs the whole buffer, ignoring dirty_range and stale below-hunks", function()
+    local b = {} for i = 1, 16 do b[i] = "L" .. i end
+    cache.set(bufnr, {
+      root             = "/fake",
+      change_id        = "cid",
+      mtime            = 0,
+      hunks            = { hunk("change", 12, 12) },  -- stale pre-deletion position
+      dirty            = true,
+      dirty_range      = { first = 2, last = 2 },     -- must be ignored
+      needs_full_diff  = true,
+      base_text        = table.concat(b, "\n") .. "\n",
+      parent_change_id = "pcid",
+      parent_commit_id = "ppid",
+    })
+
+    jj_init.refresh(bufnr)
+
+    -- Full base text was diffed (not a narrow slice).
+    eq(table.concat(b, "\n") .. "\n", captured_base)
+    assert.is_not_nil(placed)
+    eq(2, #placed)
+    eq("delete", placed[1].type)
+    eq(2, placed[1].added.start)
+    eq("change", placed[2].type)
+    eq(11, placed[2].added.start)  -- shifted up by the deletion (was 12)
+
+    local e = cache.get(bufnr)
+    eq(false, e.needs_full_diff)
+    eq(nil, e.dirty_range)
   end)
 end)
 
