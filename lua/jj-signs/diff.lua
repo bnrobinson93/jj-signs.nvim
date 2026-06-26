@@ -334,7 +334,10 @@ function M.has_conflict_marker(bufnr, first, last)
 end
 
 --- Scan buffer lines for JJ conflict markers and return conflict hunks.
---- JJ conflicts use: <<<<<<< Conflict N of M
+--- Matches the start/end fence of every jj conflict-marker style (diff, snapshot,
+--- git): all use a 7-character `<<<<<<<` / `>>>>>>>` fence followed by a space and
+--- a label. The diff/snapshot label is "conflict N of M"; the git (diff3) style
+--- instead carries a commit id, so we key on the fence, not the label.
 --- `first`/`last` narrow the scan to a 0-indexed line range (as passed to
 --- nvim_buf_get_lines); omit both to scan the whole buffer. Returned hunk line
 --- numbers are 1-based buffer lines regardless of the slice offset.
@@ -351,10 +354,10 @@ function M.find_conflicts(bufnr, first, last)
 
 	for i, line in ipairs(lines) do
 		local lnum = offset + i  -- 1-based buffer line
-		if line:match("^<<<<<<< Conflict") then
+		if line:sub(1, 8) == "<<<<<<< " then
 			in_conflict = true
 			start_lnum = lnum
-		elseif line:match("^>>>>>>> Conflict") and in_conflict then
+		elseif line:sub(1, 8) == ">>>>>>> " and in_conflict then
 			in_conflict = false
 			local count = lnum - start_lnum + 1
 			conflict_hunks[#conflict_hunks + 1] = {
@@ -368,6 +371,108 @@ function M.find_conflicts(bufnr, first, last)
 	end
 
 	return conflict_hunks
+end
+
+--- @alias JJSigns.ConflictRole "marker" | "ours" | "theirs" | "base"
+
+--- Classify the lines of a single conflict block into highlightable regions,
+--- covering all three jj marker styles (diff, snapshot, git diff3) with one state
+--- machine. Returns one entry per line that should be highlighted; context lines
+--- shared by both sides (diff-style ` ` lines) are omitted (role left to the
+--- buffer's normal highlighting).
+---
+--- jj merges are N-sided, so there is no intrinsic "ours"/"theirs" — we map the
+--- topmost side to `ours`, the bottommost to `theirs`, the merge base to `base`,
+--- and any middle sides to `ours` (matching git's diff3 top=ours convention).
+---
+--- Marker/fence/separator lines (`<<<<<<<`, `%%%%%%%`, `+++++++`, `-------`,
+--- `|||||||`, `=======`, `>>>>>>>`) are tagged `marker`.
+---
+--- @param lines string[]  the block's lines, lines[1] = the `<<<<<<<` fence
+--- @param offset integer?  1-based buffer lnum of lines[1] (default 1)
+--- @return { lnum: integer, role: JJSigns.ConflictRole }[]
+function M.parse_conflict_regions(lines, offset)
+	offset = offset or 1
+	local markers = {} --- @type { lnum: integer }[]
+	local base_lnums = {} --- @type integer[]
+	local sides = {} --- @type integer[][]  one bucket of lnums per side, in order
+	local cur_side = nil --- @type integer[]?  bucket receiving plain body lines
+	local cur_base = false           -- plain body lines go to base
+	local in_diff = false            -- inside a `%%%%%%%` diff section
+
+	local function new_side()
+		cur_side = {}
+		cur_base = false
+		in_diff = false
+		sides[#sides + 1] = cur_side
+		return cur_side
+	end
+
+	for i, line in ipairs(lines) do
+		local lnum = offset + i - 1
+		local h8 = line:sub(1, 8)
+		if h8 == "<<<<<<< " then
+			markers[#markers + 1] = { lnum = lnum }
+			new_side() -- git-style "ours" body (if any) lands here; dropped if empty
+		elseif h8 == ">>>>>>> " then
+			markers[#markers + 1] = { lnum = lnum }
+			cur_side, cur_base, in_diff = nil, false, false
+		elseif h8 == "%%%%%%% " then
+			markers[#markers + 1] = { lnum = lnum }
+			new_side() -- the diff's `+` lines form this side
+			in_diff = true
+		elseif line:sub(1, 7) == "\\\\\\\\\\\\\\" then
+			-- second line of the diff-style `%%%%%%%` header ("\\\\\\\ to: ...")
+			markers[#markers + 1] = { lnum = lnum }
+		elseif h8 == "+++++++ " then
+			markers[#markers + 1] = { lnum = lnum }
+			new_side() -- snapshot side: literal body lines
+		elseif h8 == "------- " or line:sub(1, 7) == "|||||||" then
+			markers[#markers + 1] = { lnum = lnum }
+			cur_side, cur_base, in_diff = nil, true, false
+		elseif line == "=======" then
+			markers[#markers + 1] = { lnum = lnum }
+			new_side() -- git-style "theirs" body
+		else
+			if in_diff then
+				local c = line:sub(1, 1)
+				if c == "+" then
+					cur_side[#cur_side + 1] = lnum
+				elseif c == "-" then
+					base_lnums[#base_lnums + 1] = lnum
+				end
+				-- context (` `) is shared; leave unhighlighted
+			elseif cur_side then
+				cur_side[#cur_side + 1] = lnum
+			elseif cur_base then
+				base_lnums[#base_lnums + 1] = lnum
+			end
+		end
+	end
+
+	-- Drop empty side buckets (e.g. the placeholder opened by the start fence in
+	-- diff/snapshot styles), then map first→ours, last→theirs, middle→ours.
+	local non_empty = {}
+	for _, b in ipairs(sides) do
+		if #b > 0 then non_empty[#non_empty + 1] = b end
+	end
+
+	local regions = {} --- @type { lnum: integer, role: JJSigns.ConflictRole }[]
+	for _, m in ipairs(markers) do
+		regions[#regions + 1] = { lnum = m.lnum, role = "marker" }
+	end
+	for _, l in ipairs(base_lnums) do
+		regions[#regions + 1] = { lnum = l, role = "base" }
+	end
+	for idx, bucket in ipairs(non_empty) do
+		local role = (idx == #non_empty and #non_empty > 1) and "theirs" or "ours"
+		for _, l in ipairs(bucket) do
+			regions[#regions + 1] = { lnum = l, role = role }
+		end
+	end
+
+	table.sort(regions, function(a, b) return a.lnum < b.lnum end)
+	return regions
 end
 
 --- Conflict scan with the cheap guard folded in: returns find_conflicts hunks

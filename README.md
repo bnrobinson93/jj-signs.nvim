@@ -13,6 +13,10 @@ Shows which lines in the current buffer are part of the current JJ change (`@`) 
 ╪  conflict line       — red, distinct from normal diffs
 ```
 
+Conflicts are detected and tinted by region (ours/base/theirs) across all three
+jj marker styles — `diff` (default), `snapshot`, and `git` (diff3). Disable the
+region tint with `conflict_hl = false` to keep just the `╪` sign.
+
 Signs refresh automatically on `BufEnter`, `BufWritePost`, and `FocusGained`. No manual command needed.
 
 ## Requirements
@@ -51,6 +55,7 @@ require("jj-signs").setup({
   linehl          = false,   -- highlight the full line
   word_diff       = false,   -- intra-line word highlights on changed lines
   show_deleted    = false,   -- render deleted lines as dimmed virtual text
+  conflict_hl     = true,    -- tint ours/base/theirs regions inside conflicts
   max_file_length = 40000,
   sign_priority   = 6,
   use_decoration_provider = true,  -- render signs lazily for visible lines only
@@ -365,7 +370,11 @@ Default highlight groups link to standard Neovim diff groups so any colorscheme 
 | `JJSignsDelete`          | `Removed` / `DiffDelete` | Deleted lines |
 | `JJSignsTopDelete`       | `Removed` / `DiffDelete` | Deletion at file top |
 | `JJSignsChangedelete`    | `Changed` / `DiffChange` | Change that shrinks |
-| `JJSignsConflict`        | `DiagnosticError` | Conflict markers |
+| `JJSignsConflict`        | `DiagnosticError` | Conflict sign |
+| `JJSignsConflictMarker`  | `DiagnosticError` | Conflict fence/separator lines |
+| `JJSignsConflictOurs`    | `DiffAdd`         | Conflict region: first side (ours) |
+| `JJSignsConflictBase`    | `DiffChange`      | Conflict region: merge base |
+| `JJSignsConflictTheirs`  | `DiffText`        | Conflict region: last side (theirs) |
 | `JJSignsAddWord`         | `Added` / `DiffAdd`    | Word diff inline (added) |
 | `JJSignsChangeWord`      | `Changed` / `DiffChange` | Word diff inline (changed) |
 | `JJSignsDeleteWord`      | `Removed` / `DiffDelete` | Word diff inline (deleted) |

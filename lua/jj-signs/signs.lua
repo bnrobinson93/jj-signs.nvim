@@ -65,6 +65,13 @@ function M.setup_highlights()
   api.nvim_set_hl(0, "JJSignsTopDeleteLn",     { link = "DiffDelete",      default = true })
   api.nvim_set_hl(0, "JJSignsChangeDeleteLn",  { link = "DiffChange",      default = true })
 
+  -- Conflict region tints (parse_conflict_regions roles). Linked to standard diff
+  -- groups so they read correctly in any colorscheme; override to taste.
+  api.nvim_set_hl(0, "JJSignsConflictMarker", { link = "DiagnosticError", default = true })
+  api.nvim_set_hl(0, "JJSignsConflictOurs",   { link = "DiffAdd",         default = true })
+  api.nvim_set_hl(0, "JJSignsConflictBase",   { link = "DiffChange",      default = true })
+  api.nvim_set_hl(0, "JJSignsConflictTheirs", { link = "DiffText",        default = true })
+
   api.nvim_set_hl(0, "JJSignsCurrentLineBlame", { link = "NonText", default = true })
 
   derive("JJSignsAddWord",    { "Added",   "DiffAdd" })
@@ -222,6 +229,38 @@ function M.clear(bufnr)
   redraw_buf(bufnr)
 end
 
+local CONFLICT_ROLE_HL = {
+  marker = "JJSignsConflictMarker",
+  ours   = "JJSignsConflictOurs",
+  base   = "JJSignsConflictBase",
+  theirs = "JJSignsConflictTheirs",
+}
+
+--- Tint the ours/base/theirs/marker regions inside one conflict block. Reads the
+--- block's lines from the buffer, classifies them per jj marker style via
+--- diff.parse_conflict_regions, and lays a line-bg extmark on each. Placed in the
+--- main `ns` so M.clear() removes them alongside the signs.
+--- @param bufnr integer
+--- @param hunk JJSigns.Hunk
+--- @param line_count integer
+local function place_conflict_regions(bufnr, hunk, line_count)
+  local first = math.max(hunk.added.start, 1)
+  local last = math.min(hunk.vend, line_count)
+  if last < first then return end
+
+  local lines = api.nvim_buf_get_lines(bufnr, first - 1, last, false)
+  local regions = require("jj-signs.diff").parse_conflict_regions(lines, first)
+  for _, r in ipairs(regions) do
+    local hl = CONFLICT_ROLE_HL[r.role]
+    if hl then
+      pcall(api.nvim_buf_set_extmark, bufnr, ns, r.lnum - 1, 0, {
+        line_hl_group = hl,
+        priority      = config.config.sign_priority,
+      })
+    end
+  end
+end
+
 --- @param bufnr integer
 --- @param hunks JJSigns.Hunk[]
 function M.place(bufnr, hunks)
@@ -288,6 +327,9 @@ function M.place(bufnr, hunks)
     elseif sign_type == "conflict" then
       for l = hunk.added.start, hunk.vend do
         if l >= 1 and l <= line_count then place(l, "conflict") end
+      end
+      if config.config.conflict_hl then
+        place_conflict_regions(bufnr, hunk, line_count)
       end
     end
   end

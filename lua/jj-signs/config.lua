@@ -14,6 +14,7 @@ local M = {}
 --- @field preview_config  JJSigns.PreviewConfig
 --- @field nav             JJSigns.NavConfig
 --- @field diff_opts        JJSigns.DiffOpts
+--- @field conflict_hl      boolean
 
 --- @class JJSigns.DiffOpts
 --- @field algorithm                "myers"|"minimal"|"patience"|"histogram"  xdiff algorithm
@@ -61,6 +62,10 @@ M.defaults = {
   },
   word_diff      = false,
   show_deleted   = false,
+  -- Tint the regions inside a conflict block (ours/base/theirs) with line
+  -- highlights, in addition to the conflict sign. Covers all jj marker styles
+  -- (diff/snapshot/git). Set false to keep only the signcolumn marker.
+  conflict_hl    = true,
   -- Optional: passed as `jj --repository <path>`. Leave nil to rely on cwd-based
   -- workspace detection, which handles all standard JJ workspace setups.
   jj_repo         = nil,

@@ -258,6 +258,175 @@ describe("diff.find_conflicts", function()
     eq(4, conflicts[1].vend)
     vim.api.nvim_buf_delete(bufnr, { force = true })
   end)
+
+  it("detects a lowercase JJ conflict block (jj >=0.42, diff marker style)", function()
+    local bufnr = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+      "before",
+      "<<<<<<< conflict 1 of 1",
+      "%%%%%%% diff from: ...",
+      "+a",
+      "+++++++ ...",
+      "b",
+      ">>>>>>> conflict 1 of 1 ends",
+      "after",
+    })
+    local conflicts = diff.find_conflicts(bufnr)
+    eq(1, #conflicts)
+    eq("conflict", conflicts[1].type)
+    eq(2, conflicts[1].added.start)
+    eq(7, conflicts[1].vend)
+    vim.api.nvim_buf_delete(bufnr, { force = true })
+  end)
+
+  it("detects a snapshot-style conflict block", function()
+    local bufnr = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+      "l1",
+      "<<<<<<< conflict 1 of 1",
+      '+++++++ syltpnks 7081e12b "ours"',
+      "OURS",
+      '------- tpqvxtvk e6789d46 "base"',
+      "base",
+      '+++++++ yxuysrro 7348dfb0 "theirs"',
+      "THEIRS",
+      ">>>>>>> conflict 1 of 1 ends",
+      "l3",
+    })
+    local conflicts = diff.find_conflicts(bufnr)
+    eq(1, #conflicts)
+    eq(2, conflicts[1].added.start)
+    eq(9, conflicts[1].vend)
+    vim.api.nvim_buf_delete(bufnr, { force = true })
+  end)
+
+  it("detects a git-style (diff3) conflict block whose fence carries a commit id, not 'conflict'", function()
+    local bufnr = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+      "l1",
+      '<<<<<<< syltpnks 7081e12b "ours"',
+      "OURS",
+      '||||||| tpqvxtvk e6789d46 "base"',
+      "base",
+      "=======",
+      "THEIRS",
+      '>>>>>>> yxuysrro 7348dfb0 "theirs"',
+      "l3",
+    })
+    local conflicts = diff.find_conflicts(bufnr)
+    eq(1, #conflicts)
+    eq(2, conflicts[1].added.start)
+    eq(8, conflicts[1].vend)
+    vim.api.nvim_buf_delete(bufnr, { force = true })
+  end)
+end)
+
+describe("diff.parse_conflict_regions", function()
+  -- Build { lnum -> role } from the returned region list for easy assertions.
+  local function roles_by_lnum(lines, offset)
+    local map = {}
+    for _, r in ipairs(diff.parse_conflict_regions(lines, offset)) do
+      map[r.lnum] = r.role
+    end
+    return map
+  end
+
+  it("classifies diff-style regions (base from `-`, ours from `+`, theirs snapshot)", function()
+    local r = roles_by_lnum({
+      "<<<<<<< conflict 1 of 1",        -- 1 marker
+      '%%%%%%% diff from: a',           -- 2 marker
+      "\\\\\\\\\\\\\\        to: b",    -- 3 marker (header continuation)
+      "-base",                          -- 4 base
+      "+OURS",                          -- 5 ours
+      '+++++++ theirs',                 -- 6 marker
+      "THEIRS",                         -- 7 theirs
+      ">>>>>>> conflict 1 of 1 ends",   -- 8 marker
+    })
+    eq("marker", r[1])
+    eq("marker", r[2])
+    eq("marker", r[3])
+    eq("base", r[4])
+    eq("ours", r[5])
+    eq("marker", r[6])
+    eq("theirs", r[7])
+    eq("marker", r[8])
+  end)
+
+  it("leaves diff-style context lines unhighlighted", function()
+    local r = roles_by_lnum({
+      "<<<<<<< conflict 1 of 1",
+      '%%%%%%% diff from: a to: b',
+      " ctx",                           -- 3 context — no role
+      "+OURS",                          -- 4 ours
+      '+++++++ theirs',
+      "THEIRS",
+      ">>>>>>> conflict 1 of 1 ends",
+    })
+    eq(nil, r[3])
+    eq("ours", r[4])
+  end)
+
+  it("classifies snapshot-style regions (first +++ ours, ------- base, last +++ theirs)", function()
+    local r = roles_by_lnum({
+      "<<<<<<< conflict 1 of 1",        -- 1 marker
+      '+++++++ ours',                   -- 2 marker
+      "OURS",                           -- 3 ours
+      '------- base',                   -- 4 marker
+      "base",                           -- 5 base
+      '+++++++ theirs',                 -- 6 marker
+      "THEIRS",                         -- 7 theirs
+      ">>>>>>> conflict 1 of 1 ends",   -- 8 marker
+    })
+    eq("marker", r[1])
+    eq("ours", r[3])
+    eq("marker", r[4])
+    eq("base", r[5])
+    eq("theirs", r[7])
+    eq("marker", r[8])
+  end)
+
+  it("classifies git-style (diff3) regions across ||||||| and =======", function()
+    local r = roles_by_lnum({
+      '<<<<<<< ours',                   -- 1 marker
+      "OURS",                           -- 2 ours
+      '||||||| base',                   -- 3 marker
+      "base",                           -- 4 base
+      "=======",                        -- 5 marker
+      "THEIRS",                         -- 6 theirs
+      '>>>>>>> theirs',                 -- 7 marker
+    })
+    eq("marker", r[1])
+    eq("ours", r[2])
+    eq("marker", r[3])
+    eq("base", r[4])
+    eq("marker", r[5])
+    eq("theirs", r[6])
+    eq("marker", r[7])
+  end)
+
+  it("honors the offset for 1-based buffer lnums", function()
+    local r = roles_by_lnum({
+      '<<<<<<< ours',
+      "OURS",
+      "=======",
+      "THEIRS",
+      '>>>>>>> theirs',
+    }, 10)
+    eq("marker", r[10])
+    eq("ours", r[11])
+    eq("theirs", r[13])
+  end)
+
+  it("maps a single side to ours (no spurious theirs)", function()
+    -- A 1-sided materialization (degenerate) should not invent a theirs region.
+    local r = roles_by_lnum({
+      "<<<<<<< conflict 1 of 1",
+      '+++++++ only',
+      "ONLY",
+      ">>>>>>> conflict 1 of 1 ends",
+    })
+    eq("ours", r[3])
+  end)
 end)
 
 describe("diff.has_conflict_marker", function()
