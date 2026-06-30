@@ -93,43 +93,6 @@ describe("on_lines dirty_range tracking", function()
     eq(true, captured_on_lines(nil, bufnr, nil, 0, 1, 2, nil))
   end)
 
-  it("flags needs_full_diff on a line-count-changing edit, not an in-place one", function()
-    jj_init.attach(bufnr)
-    local e = cache.get(bufnr)
-
-    -- In-place edit (last_old == last_new): narrow path stays valid.
-    captured_on_lines(nil, bufnr, nil, 2, 3, 3, nil)
-    assert.is_not_true(e.needs_full_diff)
-
-    -- Line deleted (last_new < last_old): below-hunks shift -> force full diff.
-    captured_on_lines(nil, bufnr, nil, 2, 3, 2, nil)
-    eq(true, e.needs_full_diff)
-  end)
-end)
-
-describe("diff.replace_hunks_in_range", function()
-  it("keeps non-overlapping hunks, replaces overlapping ones", function()
-    local existing = {
-      hunk("add",    2,  3),   -- above range, kept
-      hunk("change", 20, 22),  -- inside range, replaced
-      hunk("add",    50, 51),  -- below range, kept
-    }
-    local partial = {
-      hunk("change", 19, 24),
-    }
-    local result = diff.replace_hunks_in_range(existing, partial, 18, 25)
-    eq(3, #result)
-    -- sorted by added.start: 2, 19, 50
-    eq(2,  result[1].added.start)
-    eq(19, result[2].added.start)
-    eq(50, result[3].added.start)
-  end)
-
-  it("handles empty existing and empty partial", function()
-    eq({}, diff.replace_hunks_in_range({}, {}, 0, 10))
-    eq(1, #diff.replace_hunks_in_range({}, { hunk("add", 1, 1) }, 0, 10))
-    eq(1, #diff.replace_hunks_in_range({ hunk("add", 99, 99) }, {}, 0, 10))
-  end)
 end)
 
 describe("CRLF / fileformat normalization", function()
@@ -193,7 +156,7 @@ describe("CRLF / fileformat normalization", function()
   end)
 end)
 
-describe("narrow diff path in refresh()", function()
+describe("diff in refresh()", function()
   local orig_schedule, orig_get_change_id, orig_get_parent_ids, orig_diff_async, orig_place, orig_find_conflicts
   local placed
   local tmpfile, bufnr
@@ -217,10 +180,10 @@ describe("narrow diff path in refresh()", function()
     orig_get_parent_ids = diff.get_parent_ids
     diff.get_parent_ids = function(_, _, cb) cb("pcid", "ppid") end
 
-    -- Narrow diff returns a single-line change in the sliced region.
+    -- Whole-buffer diff returns the single-line change.
     orig_diff_async = diff.diff_async
     diff.diff_async = function(_, _, _, cb)
-      cb("@@ -1,1 +1,1 @@\n-l3\n+CHANGED\n")
+      cb("@@ -3,1 +3,1 @@\n-l3\n+CHANGED\n")
     end
 
     orig_find_conflicts = diff.find_conflicts
@@ -243,12 +206,12 @@ describe("narrow diff path in refresh()", function()
     os.remove(tmpfile)
   end)
 
-  it("merges narrow result and clears dirty_range", function()
+  it("places the diffed hunk and clears dirty_range", function()
     cache.set(bufnr, {
       root             = "/fake",
       change_id        = "cid",
       mtime            = 0,
-      hunks            = { hunk("add", 99, 99) },  -- far away, must survive
+      hunks            = { hunk("add", 99, 99) },  -- stale, replaced by the re-diff
       dirty            = true,
       dirty_range      = { first = 2, last = 3 },
       base_text        = "l1\nl2\nl3\nl4\nl5\n",
@@ -262,20 +225,17 @@ describe("narrow diff path in refresh()", function()
     local e = cache.get(bufnr)
     eq(nil, e.dirty_range)
     eq(false, e.dirty)
-    -- far-away cached hunk preserved + the merged narrow hunk present
-    local has_far = false
-    for _, hk in ipairs(placed) do
-      if hk.added.start == 99 then has_far = true end
-    end
-    eq(true, has_far)
+    -- The whole-buffer re-diff replaces the cached hunks: only the change@3
+    -- remains; the stale far-away hunk is gone.
+    eq(1, #placed)
+    eq("change", placed[1].type)
+    eq(3, placed[1].added.start)
   end)
 end)
 
-describe("narrow diff path: deletion alignment", function()
-  -- Regression: deleting a line made the narrow path slice base & buffer by the
-  -- same line numbers. Below the deletion the two drift apart by the line delta,
-  -- so the equal-numbered base slice pulled in a shifted line — the deletion
-  -- rendered as a spurious "-x/+y" change marker instead of a clean delete sign.
+describe("deletion alignment", function()
+  -- Regression: a deletion must render as a clean delete sign anchored above the
+  -- gap, not a spurious "-x/+y" change marker.
   local orig_schedule, orig_get_change_id, orig_get_parent_ids, orig_diff_async,
         orig_place, orig_find_conflicts
   local placed, tmpfile, bufnr
@@ -298,11 +258,11 @@ describe("narrow diff path: deletion alignment", function()
     orig_get_parent_ids = diff.get_parent_ids
     diff.get_parent_ids = function(_, _, cb) cb("pcid", "ppid") end
 
-    -- Real vim.diff on exactly the (base_narrow, buf_narrow) the path computed,
-    -- so the slice alignment is what is under test.
+    -- Real vim.diff on the (base, buffer) the path passes, so hunk anchoring is
+    -- what is under test.
     orig_diff_async = diff.diff_async
-    diff.diff_async = function(base_narrow, buf_narrow, opts, cb)
-      cb(vim.diff(base_narrow, buf_narrow, { result_type = "unified", ctxlen = opts.ctxlen or 3 }))
+    diff.diff_async = function(base, buf, opts, cb)
+      cb(vim.diff(base, buf, { result_type = "unified", ctxlen = opts.ctxlen or 3 }))
     end
 
     orig_find_conflicts = diff.find_conflicts
@@ -348,10 +308,10 @@ describe("narrow diff path: deletion alignment", function()
   end)
 end)
 
-describe("needs_full_diff: change below a deletion", function()
-  -- Regression: a line-count-changing edit left cached below-hunks at stale
-  -- positions when the narrow path ran. needs_full_diff forces a whole-buffer
-  -- re-diff so a change below a deletion lands at its shifted (correct) line.
+describe("whole-buffer re-diff: change below a deletion", function()
+  -- Regression: a stale below-hunk must not survive a refresh. refresh() always
+  -- re-diffs the whole buffer, so a change below a deletion lands at its shifted
+  -- (correct) line and the cached pre-edit position is discarded.
   local orig_schedule, orig_get_change_id, orig_get_parent_ids, orig_diff_async,
         orig_place, orig_find_conflicts
   local placed, captured_base, tmpfile, bufnr
@@ -409,7 +369,6 @@ describe("needs_full_diff: change below a deletion", function()
       hunks            = { hunk("change", 12, 12) },  -- stale pre-deletion position
       dirty            = true,
       dirty_range      = { first = 2, last = 2 },     -- must be ignored
-      needs_full_diff  = true,
       base_text        = table.concat(b, "\n") .. "\n",
       parent_change_id = "pcid",
       parent_commit_id = "ppid",
@@ -427,7 +386,6 @@ describe("needs_full_diff: change below a deletion", function()
     eq(11, placed[2].added.start)  -- shifted up by the deletion (was 12)
 
     local e = cache.get(bufnr)
-    eq(false, e.needs_full_diff)
     eq(nil, e.dirty_range)
   end)
 end)
@@ -545,5 +503,198 @@ describe("refresh() conflict scan guard (P11c)", function()
     seed()
     jj_init.refresh(bufnr)
     eq(1, fc_calls)
+  end)
+end)
+
+describe("base swap re-diffs against the new base (stale-hunk regression)", function()
+  -- Regression: when an op lands and the comparison base changes, the cached
+  -- hunks are relative to the OLD base. The refresh must re-diff the whole buffer
+  -- against the new base so a line re-classifies correctly (e.g. a `change`/blue
+  -- that should now be an `add`/green), rather than keeping its old sign until
+  -- undo or reopen.
+  local orig_schedule, orig_get_change_id, orig_get_parent_ids, orig_fetch_base,
+        orig_diff_async, orig_find_conflicts, orig_place
+  local placed, tmpfile, bufnr
+  local watcher = require("jj-signs.watcher")
+  local base_cache = require("jj-signs.base_cache")
+
+  -- Buffer holds change B's content: "Xmod" sits at line 3, far above the pending
+  -- dirty range. Against base A (which has "X" there) line 3 is a `change`;
+  -- against the new base (root, no such line) it is an `add`.
+  local buf_lines = {
+    "l1", "l2", "Xmod", "l3", "l4", "l5", "l6", "l7", "l8", "l9", "l10", "l11", "l12",
+  }
+  local base_A    = "l1\nl2\nX\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\nl11\nl12\n"
+  local base_root = "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\nl11\nl12\n"
+
+  before_each(function()
+    tmpfile = vim.fn.tempname() .. ".txt"
+    local f = assert(io.open(tmpfile, "w")); f:write(base_root); f:close()
+    bufnr = vim.fn.bufadd(tmpfile); vim.fn.bufload(bufnr)
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, buf_lines)
+
+    orig_schedule = vim.schedule
+    vim.schedule = function(fn) fn() end
+
+    orig_get_change_id = diff.get_change_id
+    diff.get_change_id = function(_, cb) cb("cidA") end
+
+    -- New parent ids (the swap): differ from the cached A ids, so refresh drops
+    -- the cached base and re-fetches.
+    orig_get_parent_ids = diff.get_parent_ids
+    diff.get_parent_ids = function(_, _, cb) cb("pcidRoot", "ppidRoot") end
+
+    orig_fetch_base = diff.fetch_base
+    diff.fetch_base = function(_, _, _, cb) cb(base_root) end
+
+    orig_diff_async = diff.diff_async
+    diff.diff_async = function(a, b, opts, cb)
+      cb(vim.diff(a, b, { result_type = "unified", ctxlen = opts.ctxlen or 0 }))
+    end
+
+    orig_find_conflicts = diff.find_conflicts
+    diff.find_conflicts = function() return {} end
+
+    orig_place = signs.place
+    placed = nil
+    signs.place = function(_, merged) placed = merged end
+  end)
+
+  after_each(function()
+    vim.schedule = orig_schedule
+    diff.get_change_id = orig_get_change_id
+    diff.get_parent_ids = orig_get_parent_ids
+    diff.fetch_base = orig_fetch_base
+    diff.diff_async = orig_diff_async
+    diff.find_conflicts = orig_find_conflicts
+    signs.place = orig_place
+    watcher._op_gen["/fake"] = nil
+    watcher._op_cid["/fake"] = nil
+    base_cache._clear()
+    cache.clear(bufnr)
+    pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+    os.remove(tmpfile)
+  end)
+
+  it("re-diffs the whole buffer against the new base instead of keeping stale hunks", function()
+    -- Op generation advanced past the one the parent ids were resolved at, so
+    -- refresh re-resolves them and observes the base swap.
+    watcher._op_gen["/fake"] = 2
+    watcher._op_cid["/fake"] = { gen = 2, change_id = "cidA" }
+    cache.set(bufnr, {
+      root             = "/fake",
+      change_id        = "cidA",
+      mtime            = 0,
+      -- Stale: a `change` at line 3, computed against base A.
+      hunks            = { hunk("change", 3, 3) },
+      dirty            = true,
+      dirty_range      = { first = 9, last = 9 },  -- pending, far from line 3
+      base_text        = base_A,
+      base_rev         = "@-",
+      parent_change_id = "pcidA",
+      parent_commit_id = "ppidA",
+      parent_gen       = 1,
+    })
+
+    jj_init.refresh(bufnr)
+
+    assert.is_not_nil(placed)
+    -- Line 3 must re-classify as an add against the new (root) base; the stale
+    -- `change` must not survive.
+    local at3
+    for _, hk in ipairs(placed) do
+      for _, l in ipairs(hk.added.lnums or {}) do
+        if l == 3 then at3 = hk.type end
+      end
+      if hk.added.start == 3 then at3 = at3 or hk.type end
+    end
+    eq("add", at3)
+    for _, hk in ipairs(placed) do
+      assert.are_not.equal("change", hk.type)
+    end
+  end)
+end)
+
+describe("in-place edit inside an added block stays add", function()
+  -- User-visible regression guard: editing a line that is part of a block of
+  -- added lines must keep the whole block classified as `add` (green), never flip
+  -- it to `change` (blue). (An earlier narrow per-keystroke diff path mis-handled
+  -- this; it has since been retired in favour of a whole-buffer re-diff.)
+  local orig_schedule, orig_get_change_id, orig_get_parent_ids, orig_diff_async,
+        orig_find_conflicts, orig_place
+  local placed, tmpfile, bufnr
+  local watcher = require("jj-signs.watcher")
+
+  before_each(function()
+    tmpfile = vim.fn.tempname() .. ".txt"
+    -- base has 3 "asdf" lines; buffer adds 4 more below them.
+    local f = assert(io.open(tmpfile, "w")); f:write("asdf\nasdf\nasdf\n"); f:close()
+    bufnr = vim.fn.bufadd(tmpfile); vim.fn.bufload(bufnr)
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+      "asdf", "asdf", "asdf", "asdfj", "asdf", "asdfasdf", "asdfX",
+    })
+
+    orig_schedule = vim.schedule
+    vim.schedule = function(fn) fn() end
+    orig_get_change_id = diff.get_change_id
+    diff.get_change_id = function(_, cb) cb("cid") end
+    orig_get_parent_ids = diff.get_parent_ids
+    diff.get_parent_ids = function(_, _, cb) cb("pcid", "ppid") end
+    orig_diff_async = diff.diff_async
+    diff.diff_async = function(a, b, opts, cb)
+      cb(vim.diff(a, b, { result_type = "unified", ctxlen = opts.ctxlen or 0 }))
+    end
+    orig_find_conflicts = diff.find_conflicts
+    diff.find_conflicts = function() return {} end
+    orig_place = signs.place
+    placed = nil
+    signs.place = function(_, merged) placed = merged end
+  end)
+
+  after_each(function()
+    vim.schedule = orig_schedule
+    diff.get_change_id = orig_get_change_id
+    diff.get_parent_ids = orig_get_parent_ids
+    diff.diff_async = orig_diff_async
+    diff.find_conflicts = orig_find_conflicts
+    signs.place = orig_place
+    watcher._op_gen["/fake"] = nil
+    watcher._op_cid["/fake"] = nil
+    cache.clear(bufnr)
+    pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+    os.remove(tmpfile)
+  end)
+
+  it("keeps an in-place edit inside an added block classified as add, not change", function()
+    watcher._op_gen["/fake"] = 1
+    watcher._op_cid["/fake"] = { gen = 1, change_id = "cid" }
+    cache.set(bufnr, {
+      root             = "/fake",
+      change_id        = "cid",
+      mtime            = 0,
+      -- The 4 added lines below the base, already diffed as one add block.
+      hunks            = { hunk("add", 4, 7) },
+      dirty            = true,
+      dirty_range      = { first = 6, last = 7 },  -- in-place edit on line 7
+      base_text        = "asdf\nasdf\nasdf\n",
+      base_rev         = "@-",
+      parent_change_id = "pcid",
+      parent_commit_id = "ppid",
+      parent_gen       = 1,
+    })
+
+    jj_init.refresh(bufnr)
+
+    assert.is_not_nil(placed)
+    for _, hk in ipairs(placed) do
+      assert.are_not.equal("change", hk.type)
+      eq(0, hk.removed.count)
+    end
+    -- The edited line stays part of an add.
+    local covered = false
+    for _, hk in ipairs(placed) do
+      if hk.type == "add" and hk.added.start <= 7 and hk.vend >= 7 then covered = true end
+    end
+    assert.is_true(covered)
   end)
 end)

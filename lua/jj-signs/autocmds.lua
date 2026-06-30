@@ -90,8 +90,8 @@ function M.setup()
   })
 
   -- TextChanged/TextChangedI/InsertEnter/InsertLeave superseded by
-  -- nvim_buf_attach's on_lines (see init.attach), which tracks the dirty line
-  -- range so the diff can be narrowed instead of re-diffing the whole buffer.
+  -- nvim_buf_attach's on_lines (see init.attach), which marks the buffer dirty
+  -- and schedules a refresh on each edit.
 
   -- Repo-internal writes (e.g. saving a file under .jj/, or a `jj workspace add`
   -- touching repo metadata) can change which workspace root a path resolves to

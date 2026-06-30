@@ -12,7 +12,6 @@
 --- @field parent_gen        integer?  op generation at which parent ids were last resolved
 --- @field update_on_view    boolean?  true when refresh was deferred because buffer had no window
 --- @field dirty_range { first: integer, last: integer }?  dirty line range (0-indexed), nil = unknown
---- @field needs_full_diff boolean?  set when a line-count-changing edit makes the narrow diff path unsafe; forces a whole-buffer re-diff
 
 --- @type table<integer, JJSigns.CacheEntry>
 local cache = {}
@@ -54,6 +53,8 @@ end
 function M.invalidate_all_in_root(root)
   for _, entry in pairs(cache) do
     if entry.root == root then
+      -- Drop the cached base content too: an op landed and base_rev may now
+      -- resolve to a different revision, so the next refresh must re-fetch it.
       entry.dirty     = true
       entry.base_text = nil
     end
