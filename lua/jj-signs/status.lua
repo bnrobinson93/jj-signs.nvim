@@ -19,15 +19,19 @@ end
 --- Build the status dict from hunks + the @ change_id.
 --- @param hunk_list JJSigns.Hunk[]?
 --- @param change_id string?
---- @return { added: integer, changed: integer, removed: integer, conflicts: integer, head: string }
-function M.build_dict(hunk_list, change_id)
+--- @param bookmark string?  bookmark pointing at @, "" when none
+--- @param description string?  first line of @'s description, "" when empty
+--- @return { added: integer, changed: integer, removed: integer, conflicts: integer, head: string, bookmark: string, description: string }
+function M.build_dict(hunk_list, change_id, bookmark, description)
   local s = hunks.get_summary(hunk_list)
   return {
-    added     = s.added,
-    changed   = s.changed,
-    removed   = s.deleted,
-    conflicts = s.conflicts,
-    head      = short(change_id),
+    added       = s.added,
+    changed     = s.changed,
+    removed     = s.deleted,
+    conflicts   = s.conflicts,
+    head        = short(change_id),
+    bookmark    = bookmark or "",
+    description = description or "",
   }
 end
 
@@ -42,9 +46,11 @@ end
 --- @param bufnr integer
 --- @param hunk_list JJSigns.Hunk[]?
 --- @param change_id string?
-function M.update(bufnr, hunk_list, change_id)
+--- @param bookmark string?
+--- @param description string?
+function M.update(bufnr, hunk_list, change_id, bookmark, description)
   if not api.nvim_buf_is_valid(bufnr) then return end
-  local dict = M.build_dict(hunk_list, change_id)
+  local dict = M.build_dict(hunk_list, change_id, bookmark, description)
   vim.b[bufnr].jjsigns_status_dict = dict
   vim.b[bufnr].jjsigns_status      = M.format(dict)
   vim.b[bufnr].jjsigns_head        = dict.head

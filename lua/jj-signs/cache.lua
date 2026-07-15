@@ -1,6 +1,8 @@
 --- @class JJSigns.CacheEntry
 --- @field root             string
 --- @field change_id        string
+--- @field bookmark         string?  bookmark pointing at @ (first if several), "" when none
+--- @field description      string?  first line of @'s description, "" when empty
 --- @field mtime            number
 --- @field hunks            JJSigns.Hunk[]
 --- @field dirty            boolean

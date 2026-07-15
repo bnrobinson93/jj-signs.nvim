@@ -74,18 +74,24 @@ function M.clear_root_cache()
 end
 
 --- @param root string
---- @param cb fun(change_id: string?)
+--- @param cb fun(change_id: string?, bookmark: string?, description: string?)  bookmark/description are "" when absent
 function M.get_change_id(root, cb)
 	vim.system(
-		jj({ "log", "-r", "@", "-T", "change_id", "--no-graph", "--color=never", "--ignore-working-copy" }),
+		jj({ "log", "-r", "@", "-T", 'change_id ++ "\n" ++ bookmarks ++ "\n" ++ description.first_line()', "--no-graph", "--color=never", "--ignore-working-copy" }),
 		{ text = true, cwd = root },
 		function(result)
-			local id = nil
+			local id, bookmark, description = nil, nil, nil
 			if result.code == 0 then
-				id = vim.trim(result.stdout)
+				-- Line 1 = change_id, line 2 = space-separated bookmarks (may be
+				-- absent), line 3 = description first line (empty for a new change).
+				local lines = vim.split(result.stdout, "\n", { plain = true })
+				id = vim.trim(lines[1] or "")
+				local first = vim.split(vim.trim(lines[2] or ""), "%s+", { trimempty = true })[1]
+				bookmark = first or ""
+				description = vim.trim(lines[3] or "")
 			end
 			vim.schedule(function()
-				cb(id)
+				cb(id, bookmark, description)
 			end)
 		end
 	)

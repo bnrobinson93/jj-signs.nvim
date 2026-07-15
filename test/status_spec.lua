@@ -26,6 +26,17 @@ describe("status.build_dict", function()
     eq(0, d.removed)
     eq(0, d.conflicts)
     eq("kkpqsvxy", d.head)
+    eq("", d.bookmark)
+  end)
+
+  it("includes the bookmark, empty when absent", function()
+    eq("main", status.build_dict({}, "cid", "main").bookmark)
+    eq("", status.build_dict({}, "cid").bookmark)
+  end)
+
+  it("includes the description, empty when absent", function()
+    eq("wip: refactor", status.build_dict({}, "cid", "", "wip: refactor").description)
+    eq("", status.build_dict({}, "cid").description)
   end)
 
   it("counts changed and removed", function()

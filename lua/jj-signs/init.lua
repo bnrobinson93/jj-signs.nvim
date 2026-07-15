@@ -193,7 +193,7 @@ end
 --- Coroutine-style: yields on the off-thread vim.diff and resumes to paint.
 --- @param bufnr integer
 --- @param base_text string
-local function do_buf_diff(bufnr, base_text)
+local function do_buf_diff(bufnr, base_text, change_id)
   if not api.nvim_buf_is_valid(bufnr) then return end
   local e = cache.get(bufnr)
   if not e then return end
@@ -238,7 +238,11 @@ local function do_buf_diff(bufnr, base_text)
   e2.dirty = false
   e2.dirty_range = nil
   signs.place(bufnr, merged)
-  status.update(bufnr, merged, e2.change_id)
+  -- Use the freshly-read change_id, not e2.change_id: on the first refresh after
+  -- attach the cached field is still "" (it is committed later, after this runs),
+  -- which would blank the statusline head. Fall back to the cached value when a
+  -- caller omits it.
+  status.update(bufnr, merged, change_id or e2.change_id, e2.bookmark, e2.description)
 end
 
 --- Coroutine body of M.refresh. Runs the full refresh pipeline with `await`
@@ -274,20 +278,22 @@ local function refresh_impl(bufnr)
   -- edit, abandon, …). Gated by the op-log watcher: when no operation landed
   -- since the last read, reuse the cached id and skip the `jj log` subprocess.
   local gen = watcher.op_gen(entry.root)
-  local new_change_id = watcher.cached_change_id(entry.root)
+  local new_change_id, new_bookmark, new_description = watcher.cached_change_id(entry.root)
   if not new_change_id then
-    new_change_id = await(function(resume)
+    new_change_id, new_bookmark, new_description = await(function(resume)
       diff_mod.get_change_id(entry.root, resume)
     end)
   end
   if not new_change_id then return end
   entry = cache.get(bufnr)
   if not entry then return end
+  entry.bookmark = new_bookmark or ""
+  entry.description = new_description or ""
 
   -- Stamp the read with the generation it was issued at. If the watcher bumped
   -- the generation while the subprocess ran, this stamp is already stale and the
   -- next refresh re-reads — the new op can't be lost.
-  watcher.record_change_id(entry.root, new_change_id, gen)
+  watcher.record_change_id(entry.root, new_change_id, gen, entry.bookmark, entry.description)
 
   -- Resolve the comparison-base parent ids only when the op generation moved
   -- since they were last resolved (or no base content is cached). Parent ids
@@ -334,12 +340,16 @@ local function refresh_impl(bufnr)
     and new_change_id == entry.change_id
     and entry.hunks ~= nil
   then
+    -- Hunks are still valid (change_id unchanged), but the bookmark or
+    -- description may have moved without moving change_id (e.g. `jj bookmark
+    -- set`, `jj describe`), so keep the statusline dict in sync before bailing.
+    status.update(bufnr, entry.hunks, new_change_id, entry.bookmark, entry.description)
     return
   end
 
   -- Diff the whole buffer against the cached base via vim.diff (off-thread) and
   -- place the signs.
-  do_buf_diff(bufnr, entry.base_text)
+  do_buf_diff(bufnr, entry.base_text, new_change_id)
 
   entry = cache.get(bufnr)
   if entry then

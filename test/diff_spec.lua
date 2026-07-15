@@ -625,6 +625,37 @@ describe("diff.get_parent_ids", function()
   end)
 end)
 
+describe("diff.get_change_id", function()
+  local orig_system, orig_schedule
+  before_each(function()
+    orig_system = vim.system
+    orig_schedule = vim.schedule
+    vim.schedule = function(fn) fn() end
+  end)
+  after_each(function()
+    vim.system = orig_system
+    vim.schedule = orig_schedule
+  end)
+
+  it("parses change_id, first bookmark, and description from lines 1-3", function()
+    vim.system = function(_, _, cb) cb({ code = 0, stdout = "abc123\nmain feature\nwip: refactor\n" }) end
+    local id, bm, desc
+    diff.get_change_id("/r", function(a, b, c) id, bm, desc = a, b, c end)
+    eq("abc123", id)
+    eq("main", bm)
+    eq("wip: refactor", desc)
+  end)
+
+  it("returns empty bookmark and description when @ has none", function()
+    vim.system = function(_, _, cb) cb({ code = 0, stdout = "abc123\n\n\n" }) end
+    local id, bm, desc
+    diff.get_change_id("/r", function(a, b, c) id, bm, desc = a, b, c end)
+    eq("abc123", id)
+    eq("", bm)
+    eq("", desc)
+  end)
+end)
+
 describe("refresh() modified-buffer base_text invalidation", function()
   local orig_system
   local orig_schedule

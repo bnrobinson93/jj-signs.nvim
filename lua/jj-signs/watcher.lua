@@ -18,7 +18,7 @@ M._watchers = watchers
 -- would be invisible to refresh() on the other. The watcher module has one
 -- canonical require name, so this state is genuinely shared.
 local op_gen = {} --- @type table<string, integer>
-local op_cid = {} --- @type table<string, { gen: integer, change_id: string }>
+local op_cid = {} --- @type table<string, { gen: integer, change_id: string, bookmark: string, description: string }>
 M._op_gen = op_gen
 M._op_cid = op_cid
 
@@ -29,13 +29,15 @@ function M.op_gen(root)
   return op_gen[root] or 0
 end
 
---- Cached @ change_id for a root, but only if it was read at the current
---- generation. A later op bump invalidates it automatically (returns nil).
+--- Cached @ change_id (and bookmark) for a root, but only if it was read at the
+--- current generation. A later op bump invalidates it automatically (returns nil).
 --- @param root string
---- @return string?
+--- @return string? change_id
+--- @return string? bookmark
+--- @return string? description
 function M.cached_change_id(root)
   local c = op_cid[root]
-  if c and c.gen == (op_gen[root] or 0) then return c.change_id end
+  if c and c.gen == (op_gen[root] or 0) then return c.change_id, c.bookmark, c.description end
   return nil
 end
 
@@ -45,8 +47,10 @@ end
 --- @param root string
 --- @param change_id string
 --- @param gen integer
-function M.record_change_id(root, change_id, gen)
-  op_cid[root] = { gen = gen, change_id = change_id }
+--- @param bookmark string?
+--- @param description string?
+function M.record_change_id(root, change_id, gen, bookmark, description)
+  op_cid[root] = { gen = gen, change_id = change_id, bookmark = bookmark or "", description = description or "" }
 end
 
 --- Bump the generation for every active root, forcing the next refresh to

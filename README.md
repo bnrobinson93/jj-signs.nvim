@@ -200,7 +200,7 @@ mirroring gitsigns' `b:gitsigns_status*`:
 
 | Variable | Contents |
 |----------|----------|
-| `b:jjsigns_status_dict` | `{ added, changed, removed, conflicts, head }` |
+| `b:jjsigns_status_dict` | `{ added, changed, removed, conflicts, head, bookmark, description }` (`bookmark` = the bookmark pointing at `@`, `""` when none; `description` = first line of `@`'s description, `""` when empty) |
 | `b:jjsigns_status`      | Formatted string, e.g. `"+3 ~1 -2"` (zero parts omitted) |
 | `b:jjsigns_head`        | Short `change_id` of `@` |
 
@@ -218,6 +218,31 @@ Read the variable instead of calling a function each redraw:
   end,
 }
 ```
+
+For a branch-name-style component, prefer the bookmark, fall back to the change
+description, then the short `change_id` — all three are on the dict, so it never
+spawns a `jj` process:
+
+```lua
+-- lualine component: current JJ change label
+{
+  function()
+    local d = vim.b.jjsigns_status_dict
+    if not d then return "" end
+    -- guard for nil, not just "": a dict from an older plugin build may lack
+    -- these keys, and `d.bookmark ~= ""` is *true* when d.bookmark is nil.
+    local nonempty = function(s) return s ~= nil and s ~= "" and s or nil end
+    return nonempty(d.bookmark) or nonempty(d.description) or d.head or ""
+  end,
+}
+```
+
+Two things to know for a real statusline: `b:jjsigns_status_dict` is
+**buffer-local and only set on attached file buffers**, so it is `nil` in a file
+explorer, dashboard, or terminal — cache the last non-empty label in an upvalue
+if you want the component to persist there instead of blanking. And a change
+`description` can be arbitrarily long, so truncate it (e.g.
+`d.description:sub(1, 20)`) before display.
 
 The `b:jjsigns_status` string is built by the configurable `status_formatter`
 (default `"+N ~N -N"`, omitting any zero count):
