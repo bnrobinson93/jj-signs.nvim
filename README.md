@@ -413,6 +413,49 @@ require("jj-signs").setup({
 - Default base is `@` vs its parent (`@-`); use `change_base <rev>` to compare against an arbitrary revision per buffer
 - No hunk-level CLI operations — restore uses the buffer API, diff uses a temp file
 
+## Alternatives
+
+A few other JJ sign plugins exist. Here is how they differ, so you can pick the
+one that fits.
+
+| | jj-signs.nvim | [dnaaun/jjsigns.nvim](https://github.com/dnaaun/jjsigns.nvim) | [evanphx/jjsigns.nvim](https://github.com/evanphx/jjsigns.nvim) | [l3d00m/jj-signs.nvim](https://github.com/l3d00m/jj-signs.nvim) |
+|---|:---:|:---:|:---:|:---:|
+| Add / change / delete signs | ✅ | ✅ | ✅ | ❌ |
+| Conflict signs + region tint (ours/base/theirs) | ✅ | ❌ | ❌ | ❌ |
+| Inline word-diff | ✅ | ✅ | ❌ | ❌ |
+| Blame (inline / virtual line) | ✅ | ✅ | ❌ | ✅ |
+| Hunk preview / navigation / restore | ✅ | ✅ | ❌ | ❌ |
+| Quickfix / location list | ✅ | ✅ | ❌ | ❌ |
+| Per-buffer base revision (`change_base`) | ✅ | ✅ | ❌ | ❌ |
+| Statusline vars (`b:jjsigns_status*`) | ✅ | ✅ | ❌ | ❌ |
+| Hunk staging | ❌ (JJ has no index) | ✅ (Git backend) | ❌ | ❌ |
+| Backend | JJ-native | Git + JJ | JJ-native | JJ-native |
+| Test suite | ✅ | — | — | — |
+
+**[dnaaun/jjsigns.nvim](https://github.com/dnaaun/jjsigns.nvim)** is the closest
+in scope — a mature gitsigns-style port with a Git backend, so it can stage
+hunks in colocated repos. It does not render conflicts.
+
+**[evanphx/jjsigns.nvim](https://github.com/evanphx/jjsigns.nvim)** is minimal:
+add/change/delete signs from `jj diff`, no hunk actions, blame, or conflicts.
+
+**[l3d00m/jj-signs.nvim](https://github.com/l3d00m/jj-signs.nvim)** shares this
+plugin's name but is blame-only — it shows `jj file annotate` output as virtual
+text and draws no diff signs at all.
+
+The distinctive feature here is **conflict rendering** — detecting materialized
+conflicts and tinting the ours/base/theirs regions across all three JJ marker
+styles — plus a JJ-first design that never touches a Git backend, and a full
+test suite.
+
+### Complementary
+
+**[NicolasGB/jj.nvim](https://github.com/NicolasGB/jj.nvim)** is not a signs
+plugin — it is an interactive JJ operations UI (log browsing, describe / squash /
+split / rebase, conflict resolution, bookmark management, PR opening). It draws
+no gutter signs, so it pairs well with jj-signs.nvim rather than competing:
+manage changes there, see them inline here.
+
 ## Troubleshooting / Docs
 
 Run a health check to diagnose a missing/old `jj`, an unsupported Neovim
