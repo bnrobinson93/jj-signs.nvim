@@ -76,8 +76,9 @@ end
 --- @param root string
 --- @param cb fun(change_id: string?, bookmark: string?, description: string?)  bookmark/description are "" when absent
 function M.get_change_id(root, cb)
+	local template = 'change_id ++ "\n" ++ bookmarks ++ "\n" ++ description.first_line()'
 	vim.system(
-		jj({ "log", "-r", "@", "-T", 'change_id ++ "\n" ++ bookmarks ++ "\n" ++ description.first_line()', "--no-graph", "--color=never", "--ignore-working-copy" }),
+		jj({ "log", "-r", "@", "-T", template, "--no-graph", "--color=never", "--ignore-working-copy" }),
 		{ text = true, cwd = root },
 		function(result)
 			local id, bookmark, description = nil, nil, nil

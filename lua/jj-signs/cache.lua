@@ -13,6 +13,8 @@
 --- @field parent_commit_id string?  commit_id of base_rev when base_text was fetched
 --- @field parent_gen        integer?  op generation at which parent ids were last resolved
 --- @field update_on_view    boolean?  true when refresh was deferred because buffer had no window
+--- @field diffing           boolean?  a diff is in flight for this buffer (per-buffer diff lock)
+--- @field diff_pending       boolean?  a refresh arrived mid-diff; re-run once the current diff finishes
 --- @field dirty_range { first: integer, last: integer }?  dirty line range (0-indexed), nil = unknown
 
 --- @type table<integer, JJSigns.CacheEntry>

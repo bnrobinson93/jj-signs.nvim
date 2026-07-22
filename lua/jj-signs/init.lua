@@ -198,6 +198,20 @@ local function do_buf_diff(bufnr, base_text, change_id)
   local e = cache.get(bufnr)
   if not e then return end
 
+  -- Serialize diffs per buffer. Refreshes reach here from several uncoordinated
+  -- coroutines (throttled auto-refresh, M.refresh on attach/change_base, the
+  -- op-log watcher) and vim.diff runs off the main thread, so two of them can
+  -- otherwise have diffs in flight for the same buffer at once — wasted work
+  -- plus a last-writer race on the placed signs. The throttle only serializes
+  -- its own path; this guard covers all of them. If a diff is already running,
+  -- record that another pass is wanted and bail; the in-flight diff re-runs once
+  -- it finishes, against the then-current buffer content.
+  if e.diffing then
+    e.diff_pending = true
+    return
+  end
+  e.diffing = true
+
   local lines = api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local buf_text = table.concat(lines, "\n")
   if vim.bo[bufnr].eol then buf_text = buf_text .. "\n" end
@@ -228,12 +242,12 @@ local function do_buf_diff(bufnr, base_text, change_id)
   local diff_out = await(function(resume)
     diff_mod.diff_async(base_text, buf_text, { ctxlen = 0 }, resume)
   end)
-  if not api.nvim_buf_is_valid(bufnr) then return end
+  if not api.nvim_buf_is_valid(bufnr) then e.diffing = false; return end
   local diff_hunks = (diff_out and diff_out ~= "") and diff_mod.parse_hunks(diff_out) or {}
   local conflict_hunks = diff_mod.scan_conflicts(bufnr)
   local merged = diff_mod.merge_hunks(diff_hunks, conflict_hunks)
   local e2 = cache.get(bufnr)
-  if not e2 then return end
+  if not e2 then e.diffing = false; return end
   e2.hunks = merged
   e2.dirty = false
   e2.dirty_range = nil
@@ -243,6 +257,15 @@ local function do_buf_diff(bufnr, base_text, change_id)
   -- which would blank the statusline head. Fall back to the cached value when a
   -- caller omits it.
   status.update(bufnr, merged, change_id or e2.change_id, e2.bookmark, e2.description)
+
+  -- Release the per-buffer diff lock. If a refresh arrived while this diff ran,
+  -- run one more pass against the now-current buffer content (coalesced: a burst
+  -- collapses to a single trailing diff, never an overlapping one).
+  e2.diffing = false
+  if e2.diff_pending then
+    e2.diff_pending = false
+    if e2.base_text then do_buf_diff(bufnr, e2.base_text, change_id) end
+  end
 end
 
 --- Coroutine body of M.refresh. Runs the full refresh pipeline with `await`
