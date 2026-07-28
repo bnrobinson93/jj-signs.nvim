@@ -102,7 +102,7 @@ function M.setup()
     group   = augroup,
     pattern = { "*.jj", "*/.jj/*" },
     callback = function()
-      require("jj-signs.diff").clear_root_cache()
+      require("jj-signs.jj").clear_root_cache()
       require("jj-signs").invalidate_op_state()
       require("jj-signs.cache").invalidate_all()
     end,

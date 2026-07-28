@@ -1,4 +1,5 @@
 local diff = require("jj-signs.diff")
+local jj = require("jj-signs.jj")
 local cache_mod = require("jj-signs.cache")
 local jj_init = require("jj-signs.init")
 local h = require("test.helpers")
@@ -29,15 +30,15 @@ describe("jj commands pass --ignore-working-copy", function()
   local function has_flag() return captured and vim.tbl_contains(captured, "--ignore-working-copy") end
 
   it("get_change_id", function()
-    diff.get_change_id("/r", function() end)
+    jj.get_change_id("/r", function() end)
     assert.is_true(has_flag(), "get_change_id missing --ignore-working-copy")
   end)
   it("get_parent_ids", function()
-    diff.get_parent_ids("/r", "@-", function() end)
+    jj.get_parent_ids("/r", "@-", function() end)
     assert.is_true(has_flag(), "get_parent_ids missing --ignore-working-copy")
   end)
   it("fetch_base", function()
-    diff.fetch_base("/r/f.txt", "/r", "@-", function() end)
+    jj.fetch_base("/r/f.txt", "/r", "@-", function() end)
     assert.is_true(has_flag(), "fetch_base missing --ignore-working-copy")
   end)
 end)
@@ -570,7 +571,7 @@ describe("diff.build_diff_opts", function()
   end)
 end)
 
-describe("diff.get_parent_ids", function()
+describe("jj.get_parent_ids", function()
   local orig_system
   local orig_schedule
 
@@ -590,7 +591,7 @@ describe("diff.get_parent_ids", function()
       cb({ code = 0, stdout = "abc123 def456\n" })
     end
     local got_pcid, got_ppid
-    diff.get_parent_ids("/fake/root", "@-", function(pcid, ppid)
+    jj.get_parent_ids("/fake/root", "@-", function(pcid, ppid)
       got_pcid = pcid
       got_ppid = ppid
     end)
@@ -603,7 +604,7 @@ describe("diff.get_parent_ids", function()
       cb({ code = 1, stdout = nil })
     end
     local got_pcid, got_ppid = "sentinel", "sentinel"
-    diff.get_parent_ids("/fake/root", "@-", function(pcid, ppid)
+    jj.get_parent_ids("/fake/root", "@-", function(pcid, ppid)
       got_pcid = pcid
       got_ppid = ppid
     end)
@@ -616,7 +617,7 @@ describe("diff.get_parent_ids", function()
       cb({ code = 0, stdout = "  changeid   commitid  \n" })
     end
     local got_pcid, got_ppid
-    diff.get_parent_ids("/fake/root", "@-", function(pcid, ppid)
+    jj.get_parent_ids("/fake/root", "@-", function(pcid, ppid)
       got_pcid = pcid
       got_ppid = ppid
     end)
@@ -625,7 +626,7 @@ describe("diff.get_parent_ids", function()
   end)
 end)
 
-describe("diff.get_change_id", function()
+describe("jj.get_change_id", function()
   local orig_system, orig_schedule
   before_each(function()
     orig_system = vim.system
@@ -640,7 +641,7 @@ describe("diff.get_change_id", function()
   it("parses change_id, first bookmark, and description from lines 1-3", function()
     vim.system = function(_, _, cb) cb({ code = 0, stdout = "abc123\nmain feature\nwip: refactor\n" }) end
     local id, bm, desc
-    diff.get_change_id("/r", function(a, b, c) id, bm, desc = a, b, c end)
+    jj.get_change_id("/r", function(a, b, c) id, bm, desc = a, b, c end)
     eq("abc123", id)
     eq("main", bm)
     eq("wip: refactor", desc)
@@ -649,7 +650,7 @@ describe("diff.get_change_id", function()
   it("returns empty bookmark and description when @ has none", function()
     vim.system = function(_, _, cb) cb({ code = 0, stdout = "abc123\n\n\n" }) end
     local id, bm, desc
-    diff.get_change_id("/r", function(a, b, c) id, bm, desc = a, b, c end)
+    jj.get_change_id("/r", function(a, b, c) id, bm, desc = a, b, c end)
     eq("abc123", id)
     eq("", bm)
     eq("", desc)

@@ -1,4 +1,5 @@
 local diff    = require("jj-signs.diff")
+local jj      = require("jj-signs.jj")
 local signs   = require("jj-signs.signs")
 local cache   = require("jj-signs.cache")
 local jj_init = require("jj-signs.init")
@@ -43,12 +44,12 @@ describe("on_lines dirty_range tracking", function()
     end
 
     -- Drive attach synchronously without subprocesses.
-    orig_get_root = diff.get_root
-    diff.get_root = function(_, cb) cb("/fake/root") end
+    orig_get_root = jj.get_root
+    jj.get_root = function(_, cb) cb("/fake/root") end
 
     -- M.refresh runs inside attach; neuter its subprocess so no real spawn.
-    orig_get_change_id = diff.get_change_id
-    diff.get_change_id = function(_, _cb) end
+    orig_get_change_id = jj.get_change_id
+    jj.get_change_id = function(_, _cb) end
 
     -- Avoid timers / real refresh during the test.
     local autocmds = require("jj-signs.autocmds")
@@ -64,8 +65,8 @@ describe("on_lines dirty_range tracking", function()
 
   after_each(function()
     vim.api.nvim_buf_attach = orig_attach
-    diff.get_root = orig_get_root
-    diff.get_change_id = orig_get_change_id
+    jj.get_root = orig_get_root
+    jj.get_change_id = orig_get_change_id
     require("jj-signs.autocmds").schedule_refresh = orig_schedule_refresh
     require("jj-signs.watcher").start = orig_watcher_start
     cache.clear(bufnr)
@@ -110,8 +111,8 @@ describe("CRLF / fileformat normalization", function()
     vim.bo[bufnr].fileformat = "dos"
 
     orig_schedule = vim.schedule; vim.schedule = function(fn) fn() end
-    orig_get_change_id = diff.get_change_id; diff.get_change_id = function(_, cb) cb("cid") end
-    orig_get_parent_ids = diff.get_parent_ids; diff.get_parent_ids = function(_, _, cb) cb("pcid", "ppid") end
+    orig_get_change_id = jj.get_change_id; jj.get_change_id = function(_, cb) cb("cid") end
+    orig_get_parent_ids = jj.get_parent_ids; jj.get_parent_ids = function(_, _, cb) cb("pcid", "ppid") end
     orig_diff_async = diff.diff_async
     diff.diff_async = function(base_text, buf_text, opts, cb)
       cb(vim.diff(base_text, buf_text, { result_type = "unified", ctxlen = opts.ctxlen or 0 }))
@@ -122,8 +123,8 @@ describe("CRLF / fileformat normalization", function()
 
   after_each(function()
     vim.schedule = orig_schedule
-    diff.get_change_id = orig_get_change_id
-    diff.get_parent_ids = orig_get_parent_ids
+    jj.get_change_id = orig_get_change_id
+    jj.get_parent_ids = orig_get_parent_ids
     diff.diff_async = orig_diff_async
     diff.find_conflicts = orig_find_conflicts
     signs.place = orig_place
@@ -174,11 +175,11 @@ describe("diff in refresh()", function()
     orig_schedule = vim.schedule
     vim.schedule = function(fn) fn() end
 
-    orig_get_change_id = diff.get_change_id
-    diff.get_change_id = function(_, cb) cb("cid") end
+    orig_get_change_id = jj.get_change_id
+    jj.get_change_id = function(_, cb) cb("cid") end
 
-    orig_get_parent_ids = diff.get_parent_ids
-    diff.get_parent_ids = function(_, _, cb) cb("pcid", "ppid") end
+    orig_get_parent_ids = jj.get_parent_ids
+    jj.get_parent_ids = function(_, _, cb) cb("pcid", "ppid") end
 
     -- Whole-buffer diff returns the single-line change.
     orig_diff_async = diff.diff_async
@@ -196,8 +197,8 @@ describe("diff in refresh()", function()
 
   after_each(function()
     vim.schedule = orig_schedule
-    diff.get_change_id = orig_get_change_id
-    diff.get_parent_ids = orig_get_parent_ids
+    jj.get_change_id = orig_get_change_id
+    jj.get_parent_ids = orig_get_parent_ids
     diff.diff_async = orig_diff_async
     diff.find_conflicts = orig_find_conflicts
     signs.place = orig_place
@@ -253,10 +254,10 @@ describe("deletion alignment", function()
     orig_schedule = vim.schedule
     vim.schedule = function(fn) fn() end
 
-    orig_get_change_id = diff.get_change_id
-    diff.get_change_id = function(_, cb) cb("cid") end
-    orig_get_parent_ids = diff.get_parent_ids
-    diff.get_parent_ids = function(_, _, cb) cb("pcid", "ppid") end
+    orig_get_change_id = jj.get_change_id
+    jj.get_change_id = function(_, cb) cb("cid") end
+    orig_get_parent_ids = jj.get_parent_ids
+    jj.get_parent_ids = function(_, _, cb) cb("pcid", "ppid") end
 
     -- Real vim.diff on the (base, buffer) the path passes, so hunk anchoring is
     -- what is under test.
@@ -275,8 +276,8 @@ describe("deletion alignment", function()
 
   after_each(function()
     vim.schedule = orig_schedule
-    diff.get_change_id = orig_get_change_id
-    diff.get_parent_ids = orig_get_parent_ids
+    jj.get_change_id = orig_get_change_id
+    jj.get_parent_ids = orig_get_parent_ids
     diff.diff_async = orig_diff_async
     diff.find_conflicts = orig_find_conflicts
     signs.place = orig_place
@@ -331,10 +332,10 @@ describe("whole-buffer re-diff: change below a deletion", function()
 
     orig_schedule = vim.schedule
     vim.schedule = function(fn) fn() end
-    orig_get_change_id = diff.get_change_id
-    diff.get_change_id = function(_, cb) cb("cid") end
-    orig_get_parent_ids = diff.get_parent_ids
-    diff.get_parent_ids = function(_, _, cb) cb("pcid", "ppid") end
+    orig_get_change_id = jj.get_change_id
+    jj.get_change_id = function(_, cb) cb("cid") end
+    orig_get_parent_ids = jj.get_parent_ids
+    jj.get_parent_ids = function(_, _, cb) cb("pcid", "ppid") end
 
     orig_diff_async = diff.diff_async
     diff.diff_async = function(base_text, buf_text, opts, cb)
@@ -350,8 +351,8 @@ describe("whole-buffer re-diff: change below a deletion", function()
 
   after_each(function()
     vim.schedule = orig_schedule
-    diff.get_change_id = orig_get_change_id
-    diff.get_parent_ids = orig_get_parent_ids
+    jj.get_change_id = orig_get_change_id
+    jj.get_parent_ids = orig_get_parent_ids
     diff.diff_async = orig_diff_async
     diff.find_conflicts = orig_find_conflicts
     signs.place = orig_place
@@ -399,14 +400,14 @@ describe("refresh() change_id subprocess skip (P11e)", function()
     bufnr = vim.fn.bufadd(tmpfile); vim.fn.bufload(bufnr)
 
     calls = 0
-    orig_get_change_id = diff.get_change_id
-    diff.get_change_id = function(_, _cb) calls = calls + 1 end
+    orig_get_change_id = jj.get_change_id
+    jj.get_change_id = function(_, _cb) calls = calls + 1 end
   end)
 
   local watcher = require("jj-signs.watcher")
 
   after_each(function()
-    diff.get_change_id = orig_get_change_id
+    jj.get_change_id = orig_get_change_id
     watcher._op_gen["/fake"] = nil
     watcher._op_cid["/fake"] = nil
     cache.clear(bufnr)
@@ -536,16 +537,16 @@ describe("base swap re-diffs against the new base (stale-hunk regression)", func
     orig_schedule = vim.schedule
     vim.schedule = function(fn) fn() end
 
-    orig_get_change_id = diff.get_change_id
-    diff.get_change_id = function(_, cb) cb("cidA") end
+    orig_get_change_id = jj.get_change_id
+    jj.get_change_id = function(_, cb) cb("cidA") end
 
     -- New parent ids (the swap): differ from the cached A ids, so refresh drops
     -- the cached base and re-fetches.
-    orig_get_parent_ids = diff.get_parent_ids
-    diff.get_parent_ids = function(_, _, cb) cb("pcidRoot", "ppidRoot") end
+    orig_get_parent_ids = jj.get_parent_ids
+    jj.get_parent_ids = function(_, _, cb) cb("pcidRoot", "ppidRoot") end
 
-    orig_fetch_base = diff.fetch_base
-    diff.fetch_base = function(_, _, _, cb) cb(base_root) end
+    orig_fetch_base = jj.fetch_base
+    jj.fetch_base = function(_, _, _, cb) cb(base_root) end
 
     orig_diff_async = diff.diff_async
     diff.diff_async = function(a, b, opts, cb)
@@ -562,9 +563,9 @@ describe("base swap re-diffs against the new base (stale-hunk regression)", func
 
   after_each(function()
     vim.schedule = orig_schedule
-    diff.get_change_id = orig_get_change_id
-    diff.get_parent_ids = orig_get_parent_ids
-    diff.fetch_base = orig_fetch_base
+    jj.get_change_id = orig_get_change_id
+    jj.get_parent_ids = orig_get_parent_ids
+    jj.fetch_base = orig_fetch_base
     diff.diff_async = orig_diff_async
     diff.find_conflicts = orig_find_conflicts
     signs.place = orig_place
@@ -636,10 +637,10 @@ describe("in-place edit inside an added block stays add", function()
 
     orig_schedule = vim.schedule
     vim.schedule = function(fn) fn() end
-    orig_get_change_id = diff.get_change_id
-    diff.get_change_id = function(_, cb) cb("cid") end
-    orig_get_parent_ids = diff.get_parent_ids
-    diff.get_parent_ids = function(_, _, cb) cb("pcid", "ppid") end
+    orig_get_change_id = jj.get_change_id
+    jj.get_change_id = function(_, cb) cb("cid") end
+    orig_get_parent_ids = jj.get_parent_ids
+    jj.get_parent_ids = function(_, _, cb) cb("pcid", "ppid") end
     orig_diff_async = diff.diff_async
     diff.diff_async = function(a, b, opts, cb)
       cb(vim.diff(a, b, { result_type = "unified", ctxlen = opts.ctxlen or 0 }))
@@ -653,8 +654,8 @@ describe("in-place edit inside an added block stays add", function()
 
   after_each(function()
     vim.schedule = orig_schedule
-    diff.get_change_id = orig_get_change_id
-    diff.get_parent_ids = orig_get_parent_ids
+    jj.get_change_id = orig_get_change_id
+    jj.get_parent_ids = orig_get_parent_ids
     diff.diff_async = orig_diff_async
     diff.find_conflicts = orig_find_conflicts
     signs.place = orig_place

@@ -4,6 +4,7 @@ local config     = require("jj-signs.config")
 local cache      = require("jj-signs.cache")
 local base_cache = require("jj-signs.base_cache")
 local async    = require("jj-signs.async")
+local jj       = require("jj-signs.jj")
 local diff_mod = require("jj-signs.diff")
 local signs    = require("jj-signs.signs")
 local hunks    = require("jj-signs.hunks")
@@ -77,7 +78,7 @@ function M.attach(bufnr)
   local filepath = api.nvim_buf_get_name(bufnr)
   if filepath == "" then return end
 
-  diff_mod.get_root(filepath, function(root)
+  jj.get_root(filepath, function(root)
     if not root then return end  -- not a jj repo
 
     cache.set(bufnr, {
@@ -304,7 +305,7 @@ local function refresh_impl(bufnr)
   local new_change_id, new_bookmark, new_description = watcher.cached_change_id(entry.root)
   if not new_change_id then
     new_change_id, new_bookmark, new_description = await(function(resume)
-      diff_mod.get_change_id(entry.root, resume)
+      jj.get_change_id(entry.root, resume)
     end)
   end
   if not new_change_id then return end
@@ -323,7 +324,7 @@ local function refresh_impl(bufnr)
   -- change only when an operation lands, so this gate avoids a `jj log` per edit.
   if not (entry.base_text and entry.parent_gen == gen) then
     local new_pcid, new_ppid = await(function(resume)
-      diff_mod.get_parent_ids(entry.root, base_rev, resume)
+      jj.get_parent_ids(entry.root, base_rev, resume)
     end)
     entry = cache.get(bufnr)
     if not entry then return end
@@ -344,7 +345,7 @@ local function refresh_impl(bufnr)
       entry.base_text = cached_base
     else
       local base_text = await(function(resume)
-        diff_mod.fetch_base(filepath, entry.root, base_rev, resume)
+        jj.fetch_base(filepath, entry.root, base_rev, resume)
       end)
       entry = cache.get(bufnr)
       if not entry then return end

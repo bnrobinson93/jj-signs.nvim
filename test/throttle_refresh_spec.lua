@@ -8,6 +8,7 @@ local helpers  = require("test.async_helpers")
 local jj_init  = require("jj-signs.init")
 local autocmds = require("jj-signs.autocmds")
 local diff_mod = require("jj-signs.diff")
+local jj_mod   = require("jj-signs.jj")
 local cache    = require("jj-signs.cache")
 
 describe("refresh caching + throttling", function()
@@ -45,10 +46,10 @@ describe("refresh caching + throttling", function()
     assert.is_true(seeded, "expected base_text cached after first modified refresh")
 
     -- Spy on get_parent_ids and diff_async for the SECOND refresh only.
-    local orig_parent = diff_mod.get_parent_ids
+    local orig_parent = jj_mod.get_parent_ids
     local orig_diff   = diff_mod.diff_async
     local parent_calls, diff_calls = 0, 0
-    diff_mod.get_parent_ids = function(...) parent_calls = parent_calls + 1; return orig_parent(...) end
+    jj_mod.get_parent_ids   = function(...) parent_calls = parent_calls + 1; return orig_parent(...) end
     diff_mod.diff_async     = function(...) diff_calls   = diff_calls   + 1; return orig_diff(...) end
 
     -- Second modified refresh, same operation (no jj op ran between).
@@ -58,7 +59,7 @@ describe("refresh caching + throttling", function()
     -- let any stray subprocess settle
     vim.wait(150, function() return false end)
 
-    diff_mod.get_parent_ids = orig_parent
+    jj_mod.get_parent_ids   = orig_parent
     diff_mod.diff_async     = orig_diff
 
     assert.is_true(diff_calls >= 1, "expected the diff to actually run on the second refresh")

@@ -1,6 +1,7 @@
 local api = vim.api
 local config = require("jj-signs.config")
 local float = require("jj-signs.float")
+local jj = require("jj-signs.jj")
 
 local M = {}
 local blame_ns = api.nvim_create_namespace("jj-signs-blame")
@@ -67,20 +68,14 @@ function M.fetch(bufnr, root, filepath, cb)
 		return
 	end
 
-	local cmd = { config.config.jj_cmd }
-	if config.config.jj_repo then
-		vim.list_extend(cmd, { "--repository", config.config.jj_repo })
-	end
-	vim.list_extend(cmd, { "annotate", "--color=never", "--", filepath })
-
-	vim.system(cmd, { text = true, cwd = root }, function(result)
-		if result.code ~= 0 then
-			vim.schedule(function() cb(nil) end)
+	jj.annotate(root, filepath, function(stdout)
+		if not stdout then
+			cb(nil)
 			return
 		end
-		local entries = parse_annotate(result.stdout)
+		local entries = parse_annotate(stdout)
 		blame_cache[bufnr] = { change_id = current_change_id, entries = entries }
-		vim.schedule(function() cb(entries) end)
+		cb(entries)
 	end)
 end
 
@@ -177,24 +172,14 @@ function M.blame_line(opts)
       return
     end
 
-    local cmd = { config.config.jj_cmd }
-    if config.config.jj_repo then
-      vim.list_extend(cmd, { "--repository", config.config.jj_repo })
-    end
-    vim.list_extend(cmd, { "show", "-r", change_id, "--color=never" })
-
-    vim.system(cmd, { text = true, cwd = cache_entry.root }, function(result)
-      if result.code ~= 0 then
-        vim.schedule(function()
-          vim.notify("jj-signs: jj show failed for " .. change_id, vim.log.levels.ERROR)
-        end)
+    jj.show(cache_entry.root, change_id, function(stdout)
+      if not stdout then
+        vim.notify("jj-signs: jj show failed for " .. change_id, vim.log.levels.ERROR)
         return
       end
-      vim.schedule(function()
-        local lines = build_show_lines(result.stdout, opts.full)
-        if #lines == 0 then lines = { "(no description)" } end
-        float.open(lines, { filetype = opts.full and "diff" or nil })
-      end)
+      local lines = build_show_lines(stdout, opts.full)
+      if #lines == 0 then lines = { "(no description)" } end
+      float.open(lines, { filetype = opts.full and "diff" or nil })
     end)
   end)
 end

@@ -1,6 +1,7 @@
 local jj_init   = require("jj-signs.init")
 local cache     = require("jj-signs.cache")
 local diff      = require("jj-signs.diff")
+local jj        = require("jj-signs.jj")
 local base_cache = require("jj-signs.base_cache")
 local signs     = require("jj-signs.signs")
 local h         = require("test.helpers")
@@ -29,19 +30,19 @@ describe("change_base / reset_base", function()
     orig.schedule = vim.schedule
     vim.schedule = function(fn) fn() end
 
-    orig.get_change_id = diff.get_change_id
-    diff.get_change_id = function(_, cb) cb("cid") end
+    orig.get_change_id = jj.get_change_id
+    jj.get_change_id = function(_, cb) cb("cid") end
 
     -- Distinct parent ids per rev so base_text invalidation always triggers a
     -- fresh fetch_base for that rev.
-    orig.get_parent_ids = diff.get_parent_ids
-    diff.get_parent_ids = function(_, rev, cb)
+    orig.get_parent_ids = jj.get_parent_ids
+    jj.get_parent_ids = function(_, rev, cb)
       resolved_revs[#resolved_revs + 1] = rev
       cb("pcid-" .. rev, "ppid-" .. rev)
     end
 
-    orig.fetch_base = diff.fetch_base
-    diff.fetch_base = function(_, _, rev, cb)
+    orig.fetch_base = jj.fetch_base
+    jj.fetch_base = function(_, _, rev, cb)
       fetched_revs[#fetched_revs + 1] = rev
       cb("base of " .. rev .. "\n")
     end
@@ -69,9 +70,9 @@ describe("change_base / reset_base", function()
 
   after_each(function()
     vim.schedule       = orig.schedule
-    diff.get_change_id = orig.get_change_id
-    diff.get_parent_ids = orig.get_parent_ids
-    diff.fetch_base    = orig.fetch_base
+    jj.get_change_id = orig.get_change_id
+    jj.get_parent_ids = orig.get_parent_ids
+    jj.fetch_base    = orig.fetch_base
     diff.diff_async    = orig.diff_async
     diff.find_conflicts = orig.find_conflicts
     signs.place        = orig.place
