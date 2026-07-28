@@ -38,10 +38,10 @@ describe("autocmds.schedule_refresh visibility deferral", function()
     vim.bo = setmetatable({}, { __index = function() return { buftype = "" } end })
 
     -- Stub the refresh target so the throttled wrapper records calls instead
-    -- of hitting jj. The throttle resolves require("jj-signs") at call time and
-    -- calls _refresh_impl (the coroutine body) inside its own coroutine.
-    real_jjsigns = package.loaded["jj-signs"]
-    package.loaded["jj-signs"] = {
+    -- of hitting jj. The throttle resolves require("jj-signs.pipeline") at call
+    -- time and calls _refresh_impl (the coroutine body) inside its own coroutine.
+    real_jjsigns = package.loaded["jj-signs.pipeline"]
+    package.loaded["jj-signs.pipeline"] = {
       _refresh_impl = function(bufnr) table.insert(refreshed, bufnr) end,
     }
   end)
@@ -51,7 +51,7 @@ describe("autocmds.schedule_refresh visibility deferral", function()
     vim.api.nvim_buf_is_valid    = real_api_buf_is_valid
     vim.api.nvim_buf_line_count  = real_api_buf_line_count
     vim.bo                       = real_bo
-    package.loaded["jj-signs"]   = real_jjsigns
+    package.loaded["jj-signs.pipeline"] = real_jjsigns
     cache.clear(BUF)
   end)
 
