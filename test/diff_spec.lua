@@ -1,5 +1,6 @@
 local diff = require("jj-signs.diff")
 local jj = require("jj-signs.jj")
+local conflict = require("jj-signs.conflict")
 local cache_mod = require("jj-signs.cache")
 local jj_init = require("jj-signs.init")
 local h = require("test.helpers")
@@ -234,11 +235,11 @@ describe("diff.parse_hunks", function()
   end)
 end)
 
-describe("diff.find_conflicts", function()
+describe("conflict.find_conflicts", function()
   it("detects no conflicts in clean buffer", function()
     local bufnr = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "line1", "line2", "line3" })
-    local conflicts = diff.find_conflicts(bufnr)
+    local conflicts = conflict.find_conflicts(bufnr)
     eq({}, conflicts)
     vim.api.nvim_buf_delete(bufnr, { force = true })
   end)
@@ -252,7 +253,7 @@ describe("diff.find_conflicts", function()
       ">>>>>>> Conflict 1 of 1 ends",
       "after",
     })
-    local conflicts = diff.find_conflicts(bufnr)
+    local conflicts = conflict.find_conflicts(bufnr)
     eq(1, #conflicts)
     eq("conflict", conflicts[1].type)
     eq(2, conflicts[1].added.start)
@@ -272,7 +273,7 @@ describe("diff.find_conflicts", function()
       ">>>>>>> conflict 1 of 1 ends",
       "after",
     })
-    local conflicts = diff.find_conflicts(bufnr)
+    local conflicts = conflict.find_conflicts(bufnr)
     eq(1, #conflicts)
     eq("conflict", conflicts[1].type)
     eq(2, conflicts[1].added.start)
@@ -294,7 +295,7 @@ describe("diff.find_conflicts", function()
       ">>>>>>> conflict 1 of 1 ends",
       "l3",
     })
-    local conflicts = diff.find_conflicts(bufnr)
+    local conflicts = conflict.find_conflicts(bufnr)
     eq(1, #conflicts)
     eq(2, conflicts[1].added.start)
     eq(9, conflicts[1].vend)
@@ -314,7 +315,7 @@ describe("diff.find_conflicts", function()
       '>>>>>>> yxuysrro 7348dfb0 "theirs"',
       "l3",
     })
-    local conflicts = diff.find_conflicts(bufnr)
+    local conflicts = conflict.find_conflicts(bufnr)
     eq(1, #conflicts)
     eq(2, conflicts[1].added.start)
     eq(8, conflicts[1].vend)
@@ -322,11 +323,11 @@ describe("diff.find_conflicts", function()
   end)
 end)
 
-describe("diff.parse_conflict_regions", function()
+describe("conflict.parse_conflict_regions", function()
   -- Build { lnum -> role } from the returned region list for easy assertions.
   local function roles_by_lnum(lines, offset)
     local map = {}
-    for _, r in ipairs(diff.parse_conflict_regions(lines, offset)) do
+    for _, r in ipairs(conflict.parse_conflict_regions(lines, offset)) do
       map[r.lnum] = r.role
     end
     return map
@@ -430,11 +431,11 @@ describe("diff.parse_conflict_regions", function()
   end)
 end)
 
-describe("diff.has_conflict_marker", function()
+describe("conflict.has_conflict_marker", function()
   it("returns false for a clean buffer", function()
     local bufnr = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "line1", "line2", "line3" })
-    eq(false, diff.has_conflict_marker(bufnr))
+    eq(false, conflict.has_conflict_marker(bufnr))
     vim.api.nvim_buf_delete(bufnr, { force = true })
   end)
 
@@ -443,7 +444,7 @@ describe("diff.has_conflict_marker", function()
     vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
       "before", "<<<<<<< Conflict 1 of 1", "after",
     })
-    eq(true, diff.has_conflict_marker(bufnr))
+    eq(true, conflict.has_conflict_marker(bufnr))
     vim.api.nvim_buf_delete(bufnr, { force = true })
   end)
 
@@ -453,13 +454,13 @@ describe("diff.has_conflict_marker", function()
       "<<<<<<< Conflict 1 of 1", "a", "b", "c",
     })
     -- marker at line 1 (0-indexed 0); range [1,4) excludes it
-    eq(false, diff.has_conflict_marker(bufnr, 1, 4))
-    eq(true, diff.has_conflict_marker(bufnr, 0, 1))
+    eq(false, conflict.has_conflict_marker(bufnr, 1, 4))
+    eq(true, conflict.has_conflict_marker(bufnr, 0, 1))
     vim.api.nvim_buf_delete(bufnr, { force = true })
   end)
 end)
 
-describe("diff.find_conflicts range scan", function()
+describe("conflict.find_conflicts range scan", function()
   it("scans only the given range and reports 1-based buffer lines", function()
     local bufnr = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
@@ -471,7 +472,7 @@ describe("diff.find_conflicts range scan", function()
       "tail",                         -- 6
     })
     -- Scan from line 3 (0-indexed 2) onward; offset preserved in output lnums.
-    local conflicts = diff.find_conflicts(bufnr, 2, 6)
+    local conflicts = conflict.find_conflicts(bufnr, 2, 6)
     eq(1, #conflicts)
     eq(3, conflicts[1].added.start)
     eq(5, conflicts[1].vend)
@@ -479,12 +480,12 @@ describe("diff.find_conflicts range scan", function()
   end)
 end)
 
-describe("diff.merge_hunks", function()
+describe("conflict.merge_hunks", function()
   it("returns diff hunks unchanged when no conflicts", function()
     local diff_hunks = {
       { type = "add", added = { start = 1, count = 1, lines = {} }, removed = { start = 0, count = 0, lines = {} }, vend = 1, head = "" },
     }
-    local result = diff.merge_hunks(diff_hunks, {})
+    local result = conflict.merge_hunks(diff_hunks, {})
     eq(1, #result)
     eq("add", result[1].type)
   end)
@@ -496,7 +497,7 @@ describe("diff.merge_hunks", function()
     local conflict_hunks = {
       { type = "conflict", added = { start = 2, count = 3, lines = {} }, removed = { start = 2, count = 3, lines = {} }, vend = 4, head = "conflict" },
     }
-    local result = diff.merge_hunks(diff_hunks, conflict_hunks)
+    local result = conflict.merge_hunks(diff_hunks, conflict_hunks)
     eq(1, #result)
     eq("conflict", result[1].type)
   end)

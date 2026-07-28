@@ -1,5 +1,6 @@
 local diff    = require("jj-signs.diff")
 local jj      = require("jj-signs.jj")
+local conflict = require("jj-signs.conflict")
 local signs   = require("jj-signs.signs")
 local cache   = require("jj-signs.cache")
 local jj_init = require("jj-signs.init")
@@ -117,7 +118,7 @@ describe("CRLF / fileformat normalization", function()
     diff.diff_async = function(base_text, buf_text, opts, cb)
       cb(vim.diff(base_text, buf_text, { result_type = "unified", ctxlen = opts.ctxlen or 0 }))
     end
-    orig_find_conflicts = diff.find_conflicts; diff.find_conflicts = function() return {} end
+    orig_find_conflicts = conflict.find_conflicts; conflict.find_conflicts = function() return {} end
     orig_place = signs.place; placed = nil; signs.place = function(_, m) placed = m end
   end)
 
@@ -126,7 +127,7 @@ describe("CRLF / fileformat normalization", function()
     jj.get_change_id = orig_get_change_id
     jj.get_parent_ids = orig_get_parent_ids
     diff.diff_async = orig_diff_async
-    diff.find_conflicts = orig_find_conflicts
+    conflict.find_conflicts = orig_find_conflicts
     signs.place = orig_place
     cache.clear(bufnr); pcall(vim.api.nvim_buf_delete, bufnr, { force = true }); os.remove(tmpfile)
   end)
@@ -187,8 +188,8 @@ describe("diff in refresh()", function()
       cb("@@ -3,1 +3,1 @@\n-l3\n+CHANGED\n")
     end
 
-    orig_find_conflicts = diff.find_conflicts
-    diff.find_conflicts = function() return {} end
+    orig_find_conflicts = conflict.find_conflicts
+    conflict.find_conflicts = function() return {} end
 
     orig_place = signs.place
     placed = nil
@@ -200,7 +201,7 @@ describe("diff in refresh()", function()
     jj.get_change_id = orig_get_change_id
     jj.get_parent_ids = orig_get_parent_ids
     diff.diff_async = orig_diff_async
-    diff.find_conflicts = orig_find_conflicts
+    conflict.find_conflicts = orig_find_conflicts
     signs.place = orig_place
     cache.clear(bufnr)
     pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
@@ -266,8 +267,8 @@ describe("deletion alignment", function()
       cb(vim.diff(base, buf, { result_type = "unified", ctxlen = opts.ctxlen or 3 }))
     end
 
-    orig_find_conflicts = diff.find_conflicts
-    diff.find_conflicts = function() return {} end
+    orig_find_conflicts = conflict.find_conflicts
+    conflict.find_conflicts = function() return {} end
 
     orig_place = signs.place
     placed = nil
@@ -279,7 +280,7 @@ describe("deletion alignment", function()
     jj.get_change_id = orig_get_change_id
     jj.get_parent_ids = orig_get_parent_ids
     diff.diff_async = orig_diff_async
-    diff.find_conflicts = orig_find_conflicts
+    conflict.find_conflicts = orig_find_conflicts
     signs.place = orig_place
     cache.clear(bufnr)
     pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
@@ -342,8 +343,8 @@ describe("whole-buffer re-diff: change below a deletion", function()
       captured_base = base_text
       cb(vim.diff(base_text, buf_text, { result_type = "unified", ctxlen = opts.ctxlen or 3 }))
     end
-    orig_find_conflicts = diff.find_conflicts
-    diff.find_conflicts = function() return {} end
+    orig_find_conflicts = conflict.find_conflicts
+    conflict.find_conflicts = function() return {} end
     orig_place = signs.place
     placed = nil
     signs.place = function(_, merged) placed = merged end
@@ -354,7 +355,7 @@ describe("whole-buffer re-diff: change below a deletion", function()
     jj.get_change_id = orig_get_change_id
     jj.get_parent_ids = orig_get_parent_ids
     diff.diff_async = orig_diff_async
-    diff.find_conflicts = orig_find_conflicts
+    conflict.find_conflicts = orig_find_conflicts
     signs.place = orig_place
     cache.clear(bufnr)
     pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
@@ -459,8 +460,8 @@ describe("refresh() conflict scan guard (P11c)", function()
     diff.diff_async = function(_, _, _, cb) cb("") end
 
     fc_calls = 0
-    orig_find_conflicts = diff.find_conflicts
-    diff.find_conflicts = function() fc_calls = fc_calls + 1; return {} end
+    orig_find_conflicts = conflict.find_conflicts
+    conflict.find_conflicts = function() fc_calls = fc_calls + 1; return {} end
 
     orig_place = signs.place
     signs.place = function() end
@@ -469,7 +470,7 @@ describe("refresh() conflict scan guard (P11c)", function()
   after_each(function()
     vim.schedule = orig_schedule
     diff.diff_async = orig_diff_async
-    diff.find_conflicts = orig_find_conflicts
+    conflict.find_conflicts = orig_find_conflicts
     signs.place = orig_place
     watcher._op_gen["/fake"] = nil
     watcher._op_cid["/fake"] = nil
@@ -553,8 +554,8 @@ describe("base swap re-diffs against the new base (stale-hunk regression)", func
       cb(vim.diff(a, b, { result_type = "unified", ctxlen = opts.ctxlen or 0 }))
     end
 
-    orig_find_conflicts = diff.find_conflicts
-    diff.find_conflicts = function() return {} end
+    orig_find_conflicts = conflict.find_conflicts
+    conflict.find_conflicts = function() return {} end
 
     orig_place = signs.place
     placed = nil
@@ -567,7 +568,7 @@ describe("base swap re-diffs against the new base (stale-hunk regression)", func
     jj.get_parent_ids = orig_get_parent_ids
     jj.fetch_base = orig_fetch_base
     diff.diff_async = orig_diff_async
-    diff.find_conflicts = orig_find_conflicts
+    conflict.find_conflicts = orig_find_conflicts
     signs.place = orig_place
     watcher._op_gen["/fake"] = nil
     watcher._op_cid["/fake"] = nil
@@ -645,8 +646,8 @@ describe("in-place edit inside an added block stays add", function()
     diff.diff_async = function(a, b, opts, cb)
       cb(vim.diff(a, b, { result_type = "unified", ctxlen = opts.ctxlen or 0 }))
     end
-    orig_find_conflicts = diff.find_conflicts
-    diff.find_conflicts = function() return {} end
+    orig_find_conflicts = conflict.find_conflicts
+    conflict.find_conflicts = function() return {} end
     orig_place = signs.place
     placed = nil
     signs.place = function(_, merged) placed = merged end
@@ -657,7 +658,7 @@ describe("in-place edit inside an added block stays add", function()
     jj.get_change_id = orig_get_change_id
     jj.get_parent_ids = orig_get_parent_ids
     diff.diff_async = orig_diff_async
-    diff.find_conflicts = orig_find_conflicts
+    conflict.find_conflicts = orig_find_conflicts
     signs.place = orig_place
     watcher._op_gen["/fake"] = nil
     watcher._op_cid["/fake"] = nil

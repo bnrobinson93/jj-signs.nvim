@@ -238,7 +238,7 @@ local CONFLICT_ROLE_HL = {
 
 --- Tint the ours/base/theirs/marker regions inside one conflict block. Reads the
 --- block's lines from the buffer, classifies them per jj marker style via
---- diff.parse_conflict_regions, and lays a line-bg extmark on each. Placed in the
+--- conflict.parse_conflict_regions, and lays a line-bg extmark on each. Placed in the
 --- main `ns` so M.clear() removes them alongside the signs.
 --- @param bufnr integer
 --- @param hunk JJSigns.Hunk
@@ -249,7 +249,7 @@ local function place_conflict_regions(bufnr, hunk, line_count)
   if last < first then return end
 
   local lines = api.nvim_buf_get_lines(bufnr, first - 1, last, false)
-  local regions = require("jj-signs.diff").parse_conflict_regions(lines, first)
+  local regions = require("jj-signs.conflict").parse_conflict_regions(lines, first)
   for _, r in ipairs(regions) do
     local hl = CONFLICT_ROLE_HL[r.role]
     if hl then

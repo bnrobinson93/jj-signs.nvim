@@ -6,6 +6,7 @@ local base_cache = require("jj-signs.base_cache")
 local async    = require("jj-signs.async")
 local jj       = require("jj-signs.jj")
 local diff_mod = require("jj-signs.diff")
+local conflict = require("jj-signs.conflict")
 local signs    = require("jj-signs.signs")
 local hunks    = require("jj-signs.hunks")
 local autocmds = require("jj-signs.autocmds")
@@ -245,8 +246,8 @@ local function do_buf_diff(bufnr, base_text, change_id)
   end)
   if not api.nvim_buf_is_valid(bufnr) then e.diffing = false; return end
   local diff_hunks = (diff_out and diff_out ~= "") and diff_mod.parse_hunks(diff_out) or {}
-  local conflict_hunks = diff_mod.scan_conflicts(bufnr)
-  local merged = diff_mod.merge_hunks(diff_hunks, conflict_hunks)
+  local conflict_hunks = conflict.scan_conflicts(bufnr)
+  local merged = conflict.merge_hunks(diff_hunks, conflict_hunks)
   local e2 = cache.get(bufnr)
   if not e2 then e.diffing = false; return end
   e2.hunks = merged

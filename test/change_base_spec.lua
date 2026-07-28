@@ -2,6 +2,7 @@ local jj_init   = require("jj-signs.init")
 local cache     = require("jj-signs.cache")
 local diff      = require("jj-signs.diff")
 local jj        = require("jj-signs.jj")
+local conflict  = require("jj-signs.conflict")
 local base_cache = require("jj-signs.base_cache")
 local signs     = require("jj-signs.signs")
 local h         = require("test.helpers")
@@ -50,8 +51,8 @@ describe("change_base / reset_base", function()
     orig.diff_async = diff.diff_async
     diff.diff_async = function(_, _, _, cb) cb("") end
 
-    orig.find_conflicts = diff.find_conflicts
-    diff.find_conflicts = function() return {} end
+    orig.find_conflicts = conflict.find_conflicts
+    conflict.find_conflicts = function() return {} end
 
     orig.place = signs.place
     signs.place = function() end
@@ -74,7 +75,7 @@ describe("change_base / reset_base", function()
     jj.get_parent_ids = orig.get_parent_ids
     jj.fetch_base    = orig.fetch_base
     diff.diff_async    = orig.diff_async
-    diff.find_conflicts = orig.find_conflicts
+    conflict.find_conflicts = orig.find_conflicts
     signs.place        = orig.place
     cache.clear(bufnr)
     base_cache._clear()
