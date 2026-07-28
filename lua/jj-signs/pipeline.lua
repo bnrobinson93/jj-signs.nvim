@@ -7,7 +7,6 @@
 local api = vim.api
 
 local cache      = require("jj-signs.cache")
-local base_cache = require("jj-signs.base_cache")
 local jj         = require("jj-signs.jj")
 local diff_mod   = require("jj-signs.diff")
 local conflict   = require("jj-signs.conflict")
@@ -194,11 +193,11 @@ local function refresh_impl(bufnr)
     entry.parent_gen = gen
   end
 
-  -- Ensure base content (the file as of base_rev) is cached: local entry, shared
-  -- base_cache, then a single `jj file show` scoped to this file. This is the
-  -- only jj read that touches file content.
+  -- Ensure base content (the file as of base_rev) is cached: local entry, the
+  -- cache's shared base store, then a single `jj file show` scoped to this file.
+  -- This is the only jj read that touches file content.
   if not entry.base_text then
-    local cached_base = base_cache.get(filepath, entry.parent_change_id, entry.parent_commit_id, base_rev)
+    local cached_base = cache.base_get(filepath, entry.parent_change_id, entry.parent_commit_id, base_rev)
     if cached_base then
       entry.base_text = cached_base
     else
@@ -208,7 +207,7 @@ local function refresh_impl(bufnr)
       entry = cache.get(bufnr)
       if not entry then return end
       entry.base_text = base_text
-      base_cache.set(filepath, entry.parent_change_id, entry.parent_commit_id, base_text, base_rev)
+      cache.base_set(filepath, entry.parent_change_id, entry.parent_commit_id, base_text, base_rev)
     end
   end
 

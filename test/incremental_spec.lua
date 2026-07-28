@@ -518,7 +518,6 @@ describe("base swap re-diffs against the new base (stale-hunk regression)", func
         orig_diff_async, orig_find_conflicts, orig_place
   local placed, tmpfile, bufnr
   local watcher = require("jj-signs.watcher")
-  local base_cache = require("jj-signs.base_cache")
 
   -- Buffer holds change B's content: "Xmod" sits at line 3, far above the pending
   -- dirty range. Against base A (which has "X" there) line 3 is a `change`;
@@ -572,7 +571,7 @@ describe("base swap re-diffs against the new base (stale-hunk regression)", func
     signs.place = orig_place
     watcher._op_gen["/fake"] = nil
     watcher._op_cid["/fake"] = nil
-    base_cache._clear()
+    cache.base_clear()
     cache.clear(bufnr)
     pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
     os.remove(tmpfile)

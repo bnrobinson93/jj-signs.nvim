@@ -3,7 +3,6 @@ local cache     = require("jj-signs.cache")
 local diff      = require("jj-signs.diff")
 local jj        = require("jj-signs.jj")
 local conflict  = require("jj-signs.conflict")
-local base_cache = require("jj-signs.base_cache")
 local signs     = require("jj-signs.signs")
 local h         = require("test.helpers")
 local eq        = h.eq
@@ -57,7 +56,7 @@ describe("change_base / reset_base", function()
     orig.place = signs.place
     signs.place = function() end
 
-    base_cache._clear()
+    cache.base_clear()
 
     cache.set(bufnr, {
       root        = "/fake",
@@ -78,7 +77,7 @@ describe("change_base / reset_base", function()
     conflict.find_conflicts = orig.find_conflicts
     signs.place        = orig.place
     cache.clear(bufnr)
-    base_cache._clear()
+    cache.base_clear()
     pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
     os.remove(tmpfile)
   end)

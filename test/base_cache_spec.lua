@@ -1,4 +1,3 @@
-local base_cache = require("jj-signs.base_cache")
 local cache_mod  = require("jj-signs.cache")
 local jj_init    = require("jj-signs.init")
 local h          = require("test.helpers")
@@ -6,56 +5,78 @@ local eq         = h.eq
 
 require("jj-signs.config").setup({})
 
-describe("base_cache.get", function()
-  before_each(function() base_cache._clear() end)
+describe("cache.base_get / base_set", function()
+  before_each(function() cache_mod.base_clear() end)
 
   it("returns nil for unknown key", function()
-    eq(nil, base_cache.get("unknown", "x", "y"))
+    eq(nil, cache_mod.base_get("unknown", "x", "y"))
   end)
 
   it("returns stored text for known key", function()
-    base_cache.set("/f", "pcid", "ppid", "hello\n")
-    eq("hello\n", base_cache.get("/f", "pcid", "ppid"))
+    cache_mod.base_set("/f", "pcid", "ppid", "hello\n")
+    eq("hello\n", cache_mod.base_get("/f", "pcid", "ppid"))
   end)
 
   it("differs by parent ids", function()
-    base_cache.set("/f", "pcid", "ppid", "a")
-    eq(nil, base_cache.get("/f", "pcid2", "ppid"))
-    eq(nil, base_cache.get("/f", "pcid", "ppid2"))
+    cache_mod.base_set("/f", "pcid", "ppid", "a")
+    eq(nil, cache_mod.base_get("/f", "pcid2", "ppid"))
+    eq(nil, cache_mod.base_get("/f", "pcid", "ppid2"))
   end)
 end)
 
-describe("base_cache.evict_stale", function()
-  before_each(function() base_cache._clear() end)
+describe("cache.base_gc", function()
+  local bufs
 
-  it("removes entries not in active set", function()
-    base_cache.set("/a", "p", "q", "ta")
-    base_cache.set("/b", "p", "q", "tb")
-
-    local active = {}
-    active[base_cache.key("/a", "p", "q")] = true
-
-    base_cache.evict_stale(active)
-
-    eq("ta", base_cache.get("/a", "p", "q"))
-    eq(nil,  base_cache.get("/b", "p", "q"))
+  before_each(function()
+    cache_mod.base_clear()
+    bufs = {}
   end)
 
-  it("clears all when active set empty", function()
-    base_cache.set("/a", "p", "q", "ta")
-    base_cache.evict_stale({})
-    eq(nil, base_cache.get("/a", "p", "q"))
+  after_each(function()
+    for _, b in ipairs(bufs) do
+      cache_mod.clear(b)
+      pcall(vim.api.nvim_buf_delete, b, { force = true })
+    end
+    cache_mod.base_clear()
+  end)
+
+  local function make_buf(name)
+    local b = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_name(b, name)
+    bufs[#bufs + 1] = b
+    return b
+  end
+
+  it("keeps base entries referenced by a live buffer, drops the rest", function()
+    local fa = vim.fn.tempname()
+    local ba = make_buf(fa)
+    cache_mod.set(ba, {
+      root = "/r", parent_change_id = "p", parent_commit_id = "q", base_rev = "@-",
+    })
+    cache_mod.base_set(fa, "p", "q", "ta", "@-")
+    cache_mod.base_set("/stale", "p", "q", "tb", "@-")
+
+    cache_mod.base_gc()
+
+    eq("ta", cache_mod.base_get(fa, "p", "q"))
+    eq(nil,  cache_mod.base_get("/stale", "p", "q"))
+  end)
+
+  it("clears all when no buffer references any base key", function()
+    cache_mod.base_set("/a", "p", "q", "ta")
+    cache_mod.base_gc()
+    eq(nil, cache_mod.base_get("/a", "p", "q"))
   end)
 end)
 
-describe("base_cache shared across refresh", function()
+describe("base content shared across refresh", function()
   local orig_system
   local orig_schedule
   local tmpfile
   local bufnr
 
   before_each(function()
-    base_cache._clear()
+    cache_mod.base_clear()
 
     tmpfile = vim.fn.tempname() .. ".txt"
     local f = assert(io.open(tmpfile, "w"))
@@ -82,8 +103,8 @@ describe("base_cache shared across refresh", function()
   -- Two buffers with same filepath+pcid+ppid share one fetch.
   -- Second refresh stands in for "buffer B, same file, same parent": its
   -- entry has base_text=nil (as C1 leaves a fresh buffer), so it must hit
-  -- the shared base_cache rather than spawning a second `jj file show`.
-  it("second buffer with same file+parent hits base_cache, no second fetch", function()
+  -- the shared base content rather than spawning a second `jj file show`.
+  it("second buffer with same file+parent hits cached base, no second fetch", function()
     local show_calls = 0
     vim.system = function(cmd, _, cb)
       if vim.tbl_contains(cmd, "log") then
@@ -96,7 +117,7 @@ describe("base_cache shared across refresh", function()
       end
     end
 
-    -- Buffer A: no cached base yet → fetches, populates base_cache.
+    -- Buffer A: no cached base yet → fetches, populates the shared store.
     cache_mod.set(bufnr, {
       root             = "/fake",
       change_id        = "cid",
@@ -109,9 +130,9 @@ describe("base_cache shared across refresh", function()
     })
     jj_init.refresh(bufnr)
     eq(1, show_calls)
-    eq("base content\n", base_cache.get(tmpfile, "pcid", "ppid"))
+    eq("base content\n", cache_mod.base_get(tmpfile, "pcid", "ppid"))
 
-    -- Buffer B (same file, same parent): base_text nil again → base_cache hit.
+    -- Buffer B (same file, same parent): base_text nil again → cached-base hit.
     cache_mod.set(bufnr, {
       root             = "/fake",
       change_id        = "cid",

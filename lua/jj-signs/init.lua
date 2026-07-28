@@ -2,7 +2,6 @@ local api = vim.api
 
 local config     = require("jj-signs.config")
 local cache      = require("jj-signs.cache")
-local base_cache = require("jj-signs.base_cache")
 local jj       = require("jj-signs.jj")
 local pipeline = require("jj-signs.pipeline")
 local signs    = require("jj-signs.signs")
@@ -144,15 +143,10 @@ function M.detach(bufnr)
   status.clear(bufnr)
   cache.clear(bufnr)
 
-  -- Evict shared base_cache entries no longer referenced by any live buffer.
-  local active_keys = {}
-  for buf, ent in pairs(cache.all()) do
-    if ent.parent_change_id and ent.parent_commit_id then
-      local fp = api.nvim_buf_get_name(buf)
-      active_keys[base_cache.key(fp, ent.parent_change_id, ent.parent_commit_id, ent.base_rev)] = true
-    end
-  end
-  base_cache.evict_stale(active_keys)
+  -- Evict shared base content no longer referenced by any live buffer. The cache
+  -- owns the eviction policy (and its key format); we just ask it to gc after
+  -- dropping this buffer's entry.
+  cache.base_gc()
 
   if entry then
     watcher.stop(entry.root)

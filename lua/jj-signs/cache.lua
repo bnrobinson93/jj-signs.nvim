@@ -76,4 +76,61 @@ function M.has(bufnr)
   return cache[bufnr] ~= nil
 end
 
+-- Shared base-content store: a file's content as of a comparison revision, keyed
+-- by (filepath, parent ids, base_rev). Distinct from the per-buffer entries above
+-- — two buffers on the same file+parent share one fetch. Kept in this module so
+-- eviction (base_gc) can be owned here instead of leaking the key format to
+-- callers.
+local base_store = {} --- @type table<string, string>
+
+--- base_rev is part of the key so a change_base never serves a stale base: two
+--- revisions resolving to different commits already differ, but keying on base_rev
+--- too keeps the default ("@-") namespace cleanly separated.
+--- @param base_rev string?
+--- @return string
+local function base_key(filepath, parent_change_id, parent_commit_id, base_rev)
+  return filepath
+    .. "|" .. (parent_change_id or "")
+    .. "|" .. (parent_commit_id or "")
+    .. "|" .. (base_rev or "@-")
+end
+
+--- @param filepath string
+--- @param parent_change_id string
+--- @param parent_commit_id string
+--- @param base_rev string?
+--- @return string?
+function M.base_get(filepath, parent_change_id, parent_commit_id, base_rev)
+  return base_store[base_key(filepath, parent_change_id, parent_commit_id, base_rev)]
+end
+
+--- @param filepath string
+--- @param parent_change_id string
+--- @param parent_commit_id string
+--- @param text string
+--- @param base_rev string?
+function M.base_set(filepath, parent_change_id, parent_commit_id, text, base_rev)
+  base_store[base_key(filepath, parent_change_id, parent_commit_id, base_rev)] = text
+end
+
+--- Evict base-content entries no longer referenced by any live buffer. Walks the
+--- per-buffer entries, computes the base key each would look up, and drops every
+--- stored key outside that active set. The key format never leaves this module.
+--- Call after clearing a detached buffer's entry.
+function M.base_gc()
+  local active = {}
+  for bufnr, entry in pairs(cache) do
+    if entry.parent_change_id and entry.parent_commit_id then
+      local fp = vim.api.nvim_buf_get_name(bufnr)
+      active[base_key(fp, entry.parent_change_id, entry.parent_commit_id, entry.base_rev)] = true
+    end
+  end
+  for k in pairs(base_store) do
+    if not active[k] then base_store[k] = nil end
+  end
+end
+
+--- For testing
+function M.base_clear() base_store = {} end
+
 return M
