@@ -81,21 +81,32 @@ function M.setup_highlights()
   api.nvim_set_hl(0, "JJSignsDeleteVirtLn", { link = "DiffDelete", default = true })
 end
 
+--- Derive the sign type for a hunk. A plain delete at top-of-file promotes to
+--- `topdelete`; a `change` that removes more than it adds (or butts up against a
+--- following delete) promotes to `changedelete`. This is the one place the rule
+--- lives — both build_hunk_index (decoration-provider path) and place (extmark
+--- path) read it, so the two rendering paths never disagree on a sign.
+--- @param hunk JJSigns.Hunk
+--- @param next_hunk JJSigns.Hunk?
+--- @return string
+local function derive_sign_type(hunk, next_hunk)
+  if hunk.type == "delete" and hunk.added.start == 0 then
+    return "topdelete"
+  elseif hunk.type == "change" and (
+    hunk.removed.count > hunk.added.count
+    or (next_hunk and next_hunk.type == "delete"
+        and next_hunk.added.start == hunk.added.start + hunk.added.count - 1)
+  ) then
+    return "changedelete"
+  end
+  return hunk.type
+end
+
 local function build_hunk_index(hunks)
   local index = {}
   for i, hunk in ipairs(hunks) do
     local next_hunk = hunks[i + 1]
-    local sign_type = hunk.type
-
-    if hunk.type == "delete" and hunk.added.start == 0 then
-      sign_type = "topdelete"
-    elseif hunk.type == "change" and (
-      hunk.removed.count > hunk.added.count
-      or (next_hunk and next_hunk.type == "delete"
-          and next_hunk.added.start == hunk.added.start + hunk.added.count - 1)
-    ) then
-      sign_type = "changedelete"
-    end
+    local sign_type = derive_sign_type(hunk, next_hunk)
 
     local start_l = hunk.added.start == 0 and 1 or hunk.added.start
     local end_l   = (hunk.type == "delete" or hunk.type == "topdelete") and start_l or hunk.vend
@@ -134,6 +145,7 @@ end
 
 M._build_hunk_index = build_hunk_index
 M._find_sign_at     = find_sign_at
+M._derive_sign_type = derive_sign_type
 
 local provider_registered = false
 
@@ -277,17 +289,7 @@ function M.place(bufnr, hunks)
 
   for i, hunk in ipairs(hunks) do
     local next_hunk = hunks[i + 1]
-    local sign_type = hunk.type
-
-    if hunk.type == "delete" and hunk.added.start == 0 then
-      sign_type = "topdelete"
-    elseif hunk.type == "change" and (
-      hunk.removed.count > hunk.added.count
-      or (next_hunk and next_hunk.type == "delete"
-          and next_hunk.added.start == hunk.added.start + hunk.added.count - 1)
-    ) then
-      sign_type = "changedelete"
-    end
+    local sign_type = derive_sign_type(hunk, next_hunk)
 
     local function place(lnum, stype)
       if use_provider and not config.config.numhl and not config.config.linehl then

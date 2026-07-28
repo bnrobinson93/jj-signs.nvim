@@ -8,6 +8,7 @@ local eq     = h.eq
 
 local build = signs._build_hunk_index
 local find  = signs._find_sign_at
+local derive = signs._derive_sign_type
 
 local function mk(type, added_start, added_count, removed_count, vend_override)
   local vend = vend_override ~= nil and vend_override
@@ -20,6 +21,28 @@ local function mk(type, added_start, added_count, removed_count, vend_override)
     vend    = vend,
   }
 end
+
+describe("signs.derive_sign_type", function()
+  it("passes plain types through", function()
+    eq("add",    derive(mk("add", 3, 4, 0)))
+    eq("change", derive(mk("change", 3, 2, 2)))
+    eq("delete", derive(mk("delete", 3, 0, 2)))
+  end)
+
+  it("promotes a top-of-file delete to topdelete", function()
+    eq("topdelete", derive(mk("delete", 0, 0, 2)))
+  end)
+
+  it("promotes change→changedelete when it removes more than it adds", function()
+    eq("changedelete", derive(mk("change", 3, 1, 3)))
+  end)
+
+  it("promotes change→changedelete when a delete butts up against it", function()
+    local h1 = mk("change", 3, 2, 2)      -- occupies lines 3-4
+    local h2 = mk("delete", 4, 0, 1)      -- delete anchored at end of the change
+    eq("changedelete", derive(h1, h2))
+  end)
+end)
 
 describe("signs.build_hunk_index", function()
   it("maps add hunk to correct range", function()
