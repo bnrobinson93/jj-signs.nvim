@@ -9,6 +9,10 @@
 #   conflict.gif — `jj new @-` makes a sibling change, edits the same line
 #                  differently, rebases onto the first change to force a conflict,
 #                  then opens it to show the region tints.
+#   features.gif — builds two ancestor changes, then tours the interactive
+#                  features on a wip change: word-diff, nav_hunk, inline hunk
+#                  preview, change_base @-- (widen the comparison), blame_line
+#                  popup, and the full-file blame split.
 #
 # Requires: jj, nvim, asciinema, agg.
 set -euo pipefail
@@ -38,7 +42,7 @@ vim.o.signcolumn = "yes"
 vim.o.laststatus = 0
 vim.o.ruler = false
 vim.o.showmode = false
-vim.o.cmdheight = 0  -- hide nvim's cmdline (also suppresses the harmless E1568 DSR notice)
+vim.o.cmdheight = 1  -- keep the command line visible so typed :JJSigns commands show
 vim.o.fillchars = "eob: "
 vim.opt.shortmess:append("aoOtTWIcF")
 vim.o.autoindent = false
@@ -56,6 +60,57 @@ fg("JJSignsChange",       "#f9e2af")
 fg("JJSignsDelete",       "#f38ba8")
 fg("JJSignsTopDelete",    "#f38ba8")
 fg("JJSignsChangedelete", "#fab387")
+
+-- Demo keycast: mirror keystrokes in a small pill at the bottom-right so viewers
+-- can follow the hotkeys/motions. Ex commands (mode "c") are skipped — the visible
+-- command line already shows those, and the lone ":" that opens it is dropped too.
+vim.api.nvim_set_hl(0, "DemoKeycast", { fg = "#1e1e2e", bg = "#f9e2af", bold = true })
+local kc = { buf = vim.api.nvim_create_buf(false, true), win = nil, text = "", timer = vim.uv.new_timer() }
+local function kc_render()
+  if kc.text == "" then
+    if kc.win and vim.api.nvim_win_is_valid(kc.win) then vim.api.nvim_win_close(kc.win, true) end
+    kc.win = nil
+    return
+  end
+  local label = " " .. kc.text .. " "
+  vim.api.nvim_buf_set_lines(kc.buf, 0, -1, false, { label })
+  vim.api.nvim_buf_add_highlight(kc.buf, -1, "DemoKeycast", 0, 0, -1)
+  local cfg = {
+    relative = "editor", anchor = "SE",
+    row = vim.o.lines - 1 - vim.o.cmdheight, col = vim.o.columns,
+    width = vim.fn.strdisplaywidth(label), height = 1,
+    style = "minimal", focusable = false, zindex = 250, noautocmd = true,
+  }
+  if kc.win and vim.api.nvim_win_is_valid(kc.win) then
+    vim.api.nvim_win_set_config(kc.win, cfg)
+  else
+    kc.win = vim.api.nvim_open_win(kc.buf, false, cfg)
+    vim.wo[kc.win].winhl = "Normal:DemoKeycast"
+  end
+end
+vim.on_key(function(_, typed)
+  if not typed or typed == "" then return end
+  if vim.fn.mode() == "c" then return end
+  local pretty = vim.fn.keytrans(typed):gsub("<Space>", "␣")
+  if pretty == "" or pretty == ":" then return end
+  vim.schedule(function()
+    kc.text = (kc.text .. pretty):sub(-22)
+    kc_render()
+    kc.timer:stop()
+    kc.timer:start(1100, 0, vim.schedule_wrap(function() kc.text = ""; kc_render() end))
+  end)
+end)
+
+-- The headless pty never answers nvim's background-color DSR, so nvim prints a
+-- one-time E1568 warning on the command line at startup. Wipe the message area
+-- for the first ~1s; the tour's typed commands come seconds later, untouched.
+local _clr, _n = vim.uv.new_timer(), 0
+_clr:start(40, 40, vim.schedule_wrap(function()
+  _n = _n + 1
+  vim.api.nvim_echo({ { "" } }, false, {})
+  if _n > 25 then _clr:stop(); _clr:close() end
+end))
+
 -- Demo-only: keep needs_full_diff set so every refresh takes the full-diff path.
 -- Otherwise the throttled incremental (dirty-range) refresh queued by on_lines
 -- runs after our forced refresh and clears the freshly-placed signs.
@@ -110,6 +165,14 @@ function M.type(s, cps)
     M.at(base + math.random(0, 18), function() A.nvim_input(c); force_refresh() end)
   end
 end
+-- type an Ex command visibly: `before` waits (so the previous action's result
+-- stays on screen), then the cmdline opens and the command is spelled out, then
+-- `hold` lets the finished command be read before <CR> runs it.
+function M.cmd(text, before, hold)
+  M.key(before or 700, ":")
+  M.type(text)
+  M.key(hold or 800, "<CR>")
+end
 function M.go() for _, st in ipairs(seq) do vim.defer_fn(function() pcall(st[2]) end, st[1]) end end
 function M.quit_after(extra) vim.defer_fn(function() vim.cmd("qa!") end, M.clock + extra) end
 return M
@@ -153,6 +216,49 @@ EOF
 cat > "$TMP/driver_view.lua" <<EOF
 local d = dofile("$TMP/drv.lua")
 d.go(); d.quit_after(4200)
+EOF
+
+# driver: guided tour of the interactive features on a wip change with real
+# history behind it — word-diff, nav_hunk, inline preview, change_base, blame.
+cat > "$TMP/driver_features.lua" <<EOF
+local d = dofile("$TMP/drv.lua")
+
+-- 1) live-edit the greeting -> change sign + intra-line word-diff highlight
+d.key(700, "j")                                       -- travel to the greet line
+d.key(450, "cc")
+d.type([[  return "Howdy there, " .. name .. "!"]])   -- only a couple words differ
+d.key(220, "<Esc>")
+
+-- 2) add a call below farewell -> a second hunk to navigate between
+d.key(1500, ":11<CR>")
+d.key(450, "o")
+d.type([[  print("done")]])
+d.key(220, "<Esc>")
+
+-- 3) nav_hunk: jump first -> next between the two hunks
+d.cmd("JJSigns nav_hunk first")
+d.cmd("JJSigns nav_hunk next", 1000)
+
+-- 4) preview_hunk_inline: removed line dimmed above, cleared on the next move
+d.cmd("JJSigns nav_hunk first", 1000)
+d.cmd("JJSigns preview_hunk_inline")
+d.key(1900, "l")
+
+-- 5) change_base @--: widen the comparison one change further back (more signs),
+--    then reset_base back to the default @-
+d.cmd("JJSigns change_base @--", 1000)
+d.cmd("JJSigns reset_base", 2200)
+
+-- 6) blame_line: popup the cursor line's change description, move to dismiss
+d.cmd("JJSigns nav_hunk first", 1200)
+d.cmd("JJSigns blame_line")
+d.key(2000, "j")
+
+-- 7) blame: full-file blame split (change_id • author • date), q to close
+d.cmd("JJSigns blame", 1000)
+d.key(2600, "q")
+
+d.go(); d.quit_after(1400)
 EOF
 
 # ---- session scripts (what asciinema records) ------------------------------
@@ -202,6 +308,59 @@ say "nvim hello.lua  # conflict materialized" 3.2;          DEMO_DRIVER="$TMP/dr
 ps1; sleep 1.0                        # trailing prompt
 EOF
 
+cat > "$TMP/session_features.sh" <<EOF
+set +e
+export COLORFGBG="15;0"
+cd "$REPO"
+ps1() { printf '%b ' '$PROMPT'; }
+say() {  # say <command-text> [think-seconds]
+  ps1; sleep "\${2:-0.6}"
+  local s=\$1 i
+  for ((i = 0; i < \${#s}; i++)); do printf '%s' "\${s:\$i:1}"; sleep 0.08; done
+  printf '\n'
+}
+
+# Build two ancestor changes off-camera so the tour has real history to blame and
+# to widen against (change_base @-- reaches past the farewell change). Silence
+# jj's "Working copy now at" chatter so it never lands in the opening frame.
+jj new -m 'greeting v2' >/dev/null 2>&1
+cat > hello.lua <<'LUA'
+local function greet(name)
+  return "Hey there, " .. name .. "!"
+end
+
+local function main()
+  print(greet("world"))
+end
+
+main()
+LUA
+
+jj new -m 'add farewell' >/dev/null 2>&1
+cat > hello.lua <<'LUA'
+local function greet(name)
+  return "Hey there, " .. name .. "!"
+end
+
+local function farewell(name)
+  return "Bye, " .. name .. "!"
+end
+
+local function main()
+  print(greet("world"))
+  print(farewell("world"))
+end
+
+main()
+LUA
+
+say "jj new -m wip" 0.5;   jj new -m 'wip' >/dev/null
+# --cmd 'set background=dark' decides the background before the TUI attaches, so
+# nvim skips the OSC/DSR bg query that agg's headless pty never answers (E1568).
+say "nvim hello.lua" 0.8;  DEMO_DRIVER="$TMP/driver_features.lua" nvim --cmd 'set background=dark' -u "$TMP/init.lua" hello.lua
+ps1; sleep 1.2
+EOF
+
 # ---- record + render -------------------------------------------------------
 record() { asciinema rec --overwrite --quiet --capture-env "" --window-size "$WIN" \
              -c "bash $1" "$2"; }
@@ -214,11 +373,24 @@ render() {
     "$1" "$2"
 }
 
+# ONLY=<name>[,<name>] limits which gifs are (re)built; default builds all three.
+want() { [ -z "${ONLY:-}" ] || case ",$ONLY," in *",$1,"*) return 0;; *) return 1;; esac; }
+
+if want signs; then
 record "$TMP/session_signs.sh"    "$TMP/signs.cast"
 render "$TMP/signs.cast"    "$OUT/signs.gif"
 echo "wrote $OUT/signs.gif"
+fi
 
+if want conflict; then
 record "$TMP/session_conflict.sh" "$TMP/conflict.cast"
 render "$TMP/conflict.cast" "$OUT/conflict.gif"
 echo "wrote $OUT/conflict.gif"
+fi
+
+if want features; then
+record "$TMP/session_features.sh" "$TMP/features.cast"
+render "$TMP/features.cast" "$OUT/features.gif"
+echo "wrote $OUT/features.gif"
+fi
 echo "done"
