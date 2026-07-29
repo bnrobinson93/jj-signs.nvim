@@ -148,13 +148,13 @@ function M.file_show(root, rev, filepath, cb)
 	)
 end
 
---- Line-by-line blame for a file (`jj annotate`).
+--- Line-by-line blame for a file (`jj file annotate`).
 --- @param root string
 --- @param filepath string
 --- @param cb fun(stdout: string?)  nil when the command fails
 function M.annotate(root, filepath, cb)
 	run(
-		{ "annotate", "--color=never", "--", filepath },
+		{ "file", "annotate", "--color=never", "--", filepath },
 		root,
 		function(result)
 			cb(result.code == 0 and result.stdout or nil)

@@ -5,8 +5,8 @@
 
 local M = {}
 
--- Oldest jj release this plugin is known to work against. `jj annotate` (used
--- by blame) and the `jj diff --from/--to` flags (used by change_base) are the
+-- Oldest jj release this plugin is known to work against. `jj file annotate`
+-- (used by blame) and the `jj diff --from/--to` flags (used by change_base) are the
 -- gating features; both are stable as of this release. Older jj may still work
 -- for plain signs but is untested.
 local MIN_JJ_VERSION = { 0, 18, 0 }
@@ -77,7 +77,7 @@ function M.check()
     elseif version_lt(ver, MIN_JJ_VERSION) then
       health.warn(
         "jj " .. ver_str(ver) .. " is older than known-good " .. ver_str(MIN_JJ_VERSION),
-        "Blame (jj annotate) and change_base may not work; upgrade jj"
+        "Blame (jj file annotate) and change_base may not work; upgrade jj"
       )
     else
       health.ok("jj " .. ver_str(ver) .. " (>= " .. ver_str(MIN_JJ_VERSION) .. ")")
